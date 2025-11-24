@@ -3,17 +3,18 @@ import requests
 import argparse
 import re
 import os
-from dotenv import load_dotenv
 from utils.db import create_connection, update_final_price
 from utils.analytics import update_all_product_stats
+from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
 
 # === CONFIGURATION ===
-BEARER_TOKEN = os.getenv('BEARER_TOKEN')
+BEARER_TOKEN = os.getenv("HIBID_TOKEN")
+
 if not BEARER_TOKEN:
-    raise ValueError("BEARER_TOKEN not found in environment variables. Please check your .env file.")
+    raise ValueError("Error: HIBID_TOKEN not found in .env file")
 
 graphql_url = "https://hibid.com/graphql"
 

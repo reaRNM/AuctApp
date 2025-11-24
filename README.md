@@ -1,53 +1,37 @@
-# AuctApp
+# AuctApp: Auction Intelligence Dashboard
 
-An auction data scraping and analysis application for HiBid auctions.
+A Streamlit-based ERP system for resellers to track active auctions, manage inventory, and analyze historical pricing.
 
 ## Features
 
-- **Auction Scraping**: Extract auction data from HiBid
-- **Data Analysis**: Track product performance and statistics
-- **Auction Closing**: Process final prices and update records
-- **Web Interface**: Streamlit-based dashboard for viewing data
+* **Active Viewer:** Scan live auctions, flag high-risk items, and cross out junk.
+* **Product Library:** Master database to store research (MSRP, Dimensions, Shipping).
+* **Auction History:** Track realized prices and automatically update average market values.
+* **Smart Linking:** Auto-match auction lots to your Master Product library.
 
-## Installation
+## Setup
 
-1. Clone the repository:
-```bash
-git clone <your-repo-url>
-cd AuctApp
-```
+1. **Install Dependencies:**
 
-2. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
+    ```bash
+    pip install -r requirements.txt
+    ```
 
-## Usage
+2. **Configure Secrets:**
+    Create a `.env` file in the root directory and add your HiBid token:
 
-### Scrape Auction Data
-```bash
-python scraper.py <auction_url>
-```
+    ```env
+    HIBID_TOKEN=Bearer YOUR_TOKEN_HERE
+    ```
 
-### Close Auction (Update Final Prices)
-```bash
-python closer.py <auction_url>
-```
+3. **Run the App:**
 
-### View Dashboard
-```bash
-streamlit run viewer.py
-```
+    ```bash
+    streamlit run viewer.py
+    ```
 
-## Project Structure
+## Workflow
 
-- `scraper.py` - Main auction data scraper
-- `closer.py` - Auction closing and final price updates
-- `viewer.py` - Streamlit dashboard
-- `utils/` - Database and analytics utilities
-- `components/` - UI components for the dashboard
-- `pages/` - Additional dashboard pages
-
-## Requirements
-
-See `requirements.txt` for Python dependencies.
+1. **Scrape:** Run `python scraper.py "https://hibid.com/catalog/..."`
+2. **View:** Open the Viewer to clean data and link products.
+3. **Close:** After auction ends, run `python closer.py "https://hibid.com/catalog/..."` to capture sold prices.
