@@ -1,6 +1,7 @@
 # utils/inventory.py
 import sqlite3
 import pandas as pd
+import difflib
 from typing import Optional, Dict, Any, List, Union
 
 # ----------------------------------------------------------------------
@@ -50,19 +51,34 @@ def _resolve_existing_id(cursor: sqlite3.Cursor, data_id: Optional[int],
     return None
 
 def _match_brand_model(item: pd.Series, products_df: pd.DataFrame) -> Optional[int]:
-    """Helper to match Brand + Model."""
+    """Helper to match Brand + Model using Exact AND Fuzzy logic."""
     if not (item.get('brand') and item.get('model')): return None
+    
     i_brand = str(item['brand']).strip().lower()
     i_model = str(item['model']).strip().lower()
-    
     if len(i_brand) < 2 or len(i_model) < 2: return None
 
+    # 1. Exact Match (Fastest)
     match = products_df[
         (products_df['brand'].str.lower().str.strip() == i_brand) & 
         (products_df['model'].str.lower().str.strip() == i_model)
     ]
-    
     if not match.empty: return int(match.iloc[0]['id'])
+
+    # 2. Fuzzy Match (Slower but smarter)
+    # We only check if exact match failed
+    for _, prod in products_df.iterrows():
+        p_brand = str(prod['brand']).lower().strip()
+        p_model = str(prod['model']).lower().strip()
+        
+        # Calculate similarity ratio
+        brand_score = difflib.SequenceMatcher(None, i_brand, p_brand).ratio()
+        model_score = difflib.SequenceMatcher(None, i_model, p_model).ratio()
+        
+        # Threshold: 0.85 (85% similar) allows for small typos but prevents false positives
+        if brand_score > 0.85 and model_score > 0.85:
+            return int(prod['id'])
+            
     return None
 
 def _check_for_conflicts(cursor: sqlite3.Cursor, product_id: int, upc: Optional[str], asin: Optional[str]) -> int:
