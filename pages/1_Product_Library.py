@@ -4,17 +4,17 @@ import pandas as pd
 import sys
 import os
 
-# Allow imports from parent directory
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.db import create_connection
 from utils.inventory import save_product_to_library, get_product_by_id, delete_product
-from components.research import _render_form_fields
+
+# FIXED: Changed import to the new UI file
+from components.research_ui import render_product_form_fields 
 
 st.set_page_config(page_title="Product Library", layout="wide")
 st.title("📚 Master Product Library")
 
-# Use context manager for connection (Safety)
 try:
     conn = create_connection()
 
@@ -65,7 +65,8 @@ try:
                 st.subheader(f"✏️ Edit: {full_data.get('title')}")
                 
                 with st.form("library_edit_form"):
-                    form_values = _render_form_fields(full_data)
+                    # FIXED: Calling the new UI function
+                    form_values = render_product_form_fields(full_data)
                     form_values['id'] = prod_id
                     
                     st.markdown("###")
@@ -74,7 +75,7 @@ try:
                         st.success("Saved!")
                         st.rerun()
                 
-                # --- PRICE HISTORY (Moved to correct indentation) ---
+                # --- PRICE HISTORY ---
                 st.markdown("---")
                 st.subheader("📈 Price History")
                 hist_query = """
@@ -98,7 +99,7 @@ try:
                 else:
                     st.caption("No sales history recorded yet.")
 
-                # --- DELETE SECTION (With Confirmation) ---
+                # --- DELETE SECTION ---
                 st.markdown("---")
                 with st.expander("🗑️ Delete Product"):
                     st.warning("This will delete the product and unlink all associated auction items.")
@@ -118,7 +119,8 @@ try:
             with st.expander("➕ Create New Product from Scratch"):
                 with st.form("new_product_form"):
                     empty_data = {}
-                    new_values = _render_form_fields(empty_data)
+                    # FIXED: Calling the new UI function
+                    new_values = render_product_form_fields(empty_data)
                     if st.form_submit_button("Create Product"):
                         save_product_to_library(conn, new_values)
                         st.success("Created!")

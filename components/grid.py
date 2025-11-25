@@ -18,12 +18,35 @@ def _configure_columns(gb: GridOptionsBuilder, df: pd.DataFrame):
         if col in columns:
             gb.configure_column(col, hide=True)
 
-    # Watch Column
+    # === 1. DEDICATED SELECTION COLUMN ===
+    if "Select" in columns:
+        gb.configure_column("Select", 
+            checkboxSelection=True,      
+            headerCheckboxSelection=True,
+            width=70,                    # Slightly wider for the text
+            pinned="left",
+            headerName="Select",         # <--- FIXED: Header is back
+            suppressMenu=True,
+            valueFormatter=JS_EMPTY_TEXT 
+        )
+
+    # === 2. RISK COLUMN (The Buffer) ===
+    # FIXED: Added this back so it pins left and separates Select from Watch
+    if "Risk" in columns:
+        gb.configure_column("Risk", 
+            width=130, 
+            pinned="left"
+        )
+
+    # === 3. WATCH COLUMN (Strict Checkbox) ===
     if "Watch" in columns:
         gb.configure_column("Watch", 
-            editable=True, cellRenderer=JS_CHECKBOX_RENDERER, 
-            cellEditor='agCheckboxCellEditor', valueFormatter=JS_EMPTY_TEXT, 
-            width=60, headerName=" ⭐ "
+            editable=True, 
+            cellRenderer=JS_CHECKBOX_RENDERER, # <--- FIXED: Custom Renderer (No text)
+            cellEditor='agCheckboxCellEditor',     
+            width=70, 
+            pinned="left", 
+            headerName="⭐"
         )
 
     # Sorting
@@ -48,18 +71,18 @@ def render_grid(df: pd.DataFrame, height: int = 650, allow_selection: bool = Tru
     gb.configure_default_column(sortable=True, filterable=True, resizable=True, wrapText=True, autoHeight=True)
     gb.configure_grid_options(getRowStyle=JS_ROW_STYLE)
     
-    # ENABLE EXCEL-STYLE SELECTION
-    # This allows you to highlight cells for copy/paste
+    # Allow range selection for copy-paste
     gb.configure_grid_options(enableRangeSelection=True) 
 
     _configure_columns(gb, df)
 
     if allow_selection:
+        # We disable the default 'use_checkbox' because we manually added a 'Select' column
         gb.configure_selection(
             selection_mode="multiple", 
-            use_checkbox=True, 
-            header_checkbox=True,
-            suppressRowClickSelection=False 
+            use_checkbox=False, 
+            header_checkbox=False,
+            suppressRowClickSelection=True 
         )
 
     grid_options = gb.build()

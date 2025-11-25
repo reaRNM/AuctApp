@@ -155,6 +155,8 @@ def get_auction_items(conn, auction_id: int) -> pd.DataFrame:
             i.id, i.auction_id, i.product_id,
             i.lot as lot_number, 
             i.current_bid, 
+            
+            -- CRITICAL: Ensure these are selected
             i.sold_price, 
             i.status,
             
