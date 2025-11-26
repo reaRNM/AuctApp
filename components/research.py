@@ -17,10 +17,25 @@ def _get_initial_data(conn, first_item):
             is_linked = True
     else:
         # Template from raw auction data
+        # NEW: Check if we scraped a Suggested MSRP
+        # We need to ensure 'suggested_msrp' is passed in 'first_item'. 
+        # If it's missing from the grid view, we might need to fetch it or rely on what's available.
+        # For now, let's assume it might be passed or we default to 0.
+        
+        # NOTE: You might need to add 'suggested_msrp' to get_auction_items in db.py 
+        # if you want it available here instantly without a fetch.
+        # For now, we check if it exists in the row data.
+        
+        msrp_guess = first_item.get('suggested_msrp', 0.0)
+        
         product_data = {
-            'title': first_item.get('Title'), 'brand': first_item.get('Brand'),
-            'model': first_item.get('Model'), 'upc': first_item.get('UPC'),
-            'asin': first_item.get('ASIN'), 'notes': first_item.get('Notes')
+            'title': first_item.get('Title'), 
+            'brand': first_item.get('Brand'),
+            'model': first_item.get('Model'), 
+            'upc': first_item.get('UPC'),
+            'asin': first_item.get('ASIN'), 
+            'notes': first_item.get('Notes'),
+            'msrp': msrp_guess # Pre-fill!
         }
     
     return product_data, existing_product_id, is_linked

@@ -1,7 +1,5 @@
-# components/grid_styles.py
 from st_aggrid import JsCode
 
-# 1. RENDERERS
 JS_EMPTY_TEXT = JsCode("""function(params) { return ""; }""")
 
 JS_CHECKBOX_RENDERER = JsCode("""
@@ -21,7 +19,6 @@ class CheckboxRenderer {
 }
 """)
 
-# 2. ROW STYLING (Whole Row)
 JS_ROW_STYLE = JsCode("""
 function(params) {
     if (params.data.is_hidden === 1) {
@@ -34,34 +31,9 @@ function(params) {
 }
 """)
 
-# 3. CELL STYLING (Specific Flags)
-JS_STYLE_BAD_YES = JsCode("""
-function(params) {
-    if (String(params.value).toLowerCase().trim() === 'yes') {
-        return {'fontWeight': 'bold', 'color': '#b71c1c'}; 
-    }
-    return {};
-}
-""")
+JS_STYLE_BAD_YES = JsCode("""function(params) { if (String(params.value).toLowerCase().trim() === 'yes') { return {'fontWeight': 'bold', 'color': '#b71c1c'}; } return {}; }""")
+JS_STYLE_BAD_NO = JsCode("""function(params) { if (String(params.value).toLowerCase().trim() === 'no') { return {'fontWeight': 'bold', 'color': '#b71c1c'}; } return {}; }""")
+JS_STYLE_BAD_COND = JsCode("""function(params) { if (String(params.value).toLowerCase().trim() === 'for parts only') { return {'fontWeight': 'bold', 'color': '#b71c1c'}; } return {}; }""")
 
-JS_STYLE_BAD_NO = JsCode("""
-function(params) {
-    if (String(params.value).toLowerCase().trim() === 'no') {
-        return {'fontWeight': 'bold', 'color': '#b71c1c'}; 
-    }
-    return {};
-}
-""")
-
-JS_STYLE_BAD_COND = JsCode("""
-function(params) {
-    if (String(params.value).toLowerCase().trim() === 'for parts only') {
-        return {'fontWeight': 'bold', 'color': '#b71c1c'}; 
-    }
-    return {};
-}
-""")
-
-# 4. SORTERS
 JS_NATURAL_SORT = JsCode(r"""function(a,b){return a.localeCompare(b, undefined, {numeric: true, sensitivity: 'base'});}""")
 JS_CURRENCY_SORT = JsCode(r"""function(a,b){return (parseFloat(String(a).replace(/[$,]/g,''))||0) - (parseFloat(String(b).replace(/[$,]/g,''))||0);}""")

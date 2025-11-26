@@ -8,7 +8,9 @@ os.makedirs("output", exist_ok=True)
 from utils.db import create_connection, ensure_schema, insert_auction_item, insert_auction
 from dotenv import load_dotenv
 
+
 load_dotenv()
+
 
 # === CONFIGURATION ===
 BEARER_TOKEN = os.getenv("HIBID_TOKEN")
@@ -300,6 +302,11 @@ DAMAGE_DESCRIPTION = "Damage Description"
 MISSING_PARTS_DESCRIPTION = "Missing Parts Description"
 MISSING_PARTS = "Missing Parts"
 
+# === NEW REGEX FOR MSRP ===
+# Matches "$320 Title" or "$1,200.00 Title"
+PRICE_PATTERN = re.compile(r'^\s*\$(\d+(?:,\d+)*(?:\.\d+)?)\s+(.*)')
+
+
 # === FUNCTION TO EXTRACT AUCTION ID FROM URL ===
 def extract_auction_id(url: str) -> int:
     """Extract numeric auction ID from a HiBid URL."""
@@ -324,7 +331,6 @@ def get_current_bid(item: dict) -> float:
     return 0.0
 
 def parse_description(description_text: str) -> dict:
-    """Parse the description block into a dict."""
     lines = description_text.splitlines()
     data = {}
     field_mappings = {
@@ -348,8 +354,25 @@ def parse_description(description_text: str) -> dict:
         line = line.strip()
         for prefix, (key, offset) in field_mappings.items():
             if line.startswith(prefix):
-                data[key] = line[offset:].strip()
+                val = line[offset:].strip()
+                data[key] = val
                 break
+    
+    # === NEW: Smart MSRP Extraction ===
+    # Check if Title starts with a price
+    if 'Title' in data:
+        raw_title = data['Title']
+        match = PRICE_PATTERN.match(raw_title)
+        if match:
+            price_str = match.group(1).replace(',', '') # Extract price part
+            clean_title = match.group(2).strip()        # Extract rest of title
+            
+            try:
+                data['SuggestedMSRP'] = float(price_str)
+                data['Title'] = clean_title # Overwrite with clean title
+            except ValueError:
+                pass # If parse fails, keep original
+                
     return data
 
 

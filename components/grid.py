@@ -13,11 +13,9 @@ COLUMN_BID = "Bid"
 def _configure_columns(gb: GridOptionsBuilder, df: pd.DataFrame):
     columns = df.columns
 
-    # Hide Utility Columns
-    for col in ["id", "current_bid", "is_hidden", "product_id", "auction_id"]:
-        if col in columns:
-            gb.configure_column(col, hide=True)
-
+    for col in ["id", "current_bid", "is_hidden", "product_id", "auction_id", "sold_price", "suggested_msrp"]:
+        if col in columns: gb.configure_column(col, hide=True)
+        
     # === 1. DEDICATED SELECTION COLUMN ===
     if "Select" in columns:
         gb.configure_column("Select", 
@@ -50,7 +48,12 @@ def _configure_columns(gb: GridOptionsBuilder, df: pd.DataFrame):
         )
 
     # Sorting
-    if "Lot" in columns: gb.configure_column("Lot", comparator=JS_NATURAL_SORT)
+    # === SORTING FIXES ===
+    # Apply Natural Sort to ALL text fields
+    text_cols = ["Lot", "Title", "Brand", "Model", "UPC", "ASIN", "Category"]
+    for col in text_cols:
+        if col in columns:
+            gb.configure_column(col, comparator=JS_NATURAL_SORT)
     if COLUMN_BID in columns: gb.configure_column(COLUMN_BID, width=100, comparator=JS_CURRENCY_SORT)
 
     # Risk Styles
@@ -64,16 +67,14 @@ def _configure_columns(gb: GridOptionsBuilder, df: pd.DataFrame):
 
 
 def render_grid(df: pd.DataFrame, height: int = 650, allow_selection: bool = True):
-    if df is None or df.empty:
-        return {"selected": [], "data": df}
-
+    # ... (Render logic remains the same) ...
+    if df is None or df.empty: return {"selected": [], "data": df}
+    
     gb = GridOptionsBuilder.from_dataframe(df)
     gb.configure_default_column(sortable=True, filterable=True, resizable=True, wrapText=True, autoHeight=True)
     gb.configure_grid_options(getRowStyle=JS_ROW_STYLE)
-    
-    # Allow range selection for copy-paste
     gb.configure_grid_options(enableRangeSelection=True) 
-
+    
     _configure_columns(gb, df)
 
     if allow_selection:

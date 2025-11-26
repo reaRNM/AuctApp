@@ -43,8 +43,6 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
                 product_id INTEGER, 
                 lot TEXT,
                 current_bid REAL DEFAULT 0,
-                
-                -- NEW COLUMNS FOR HISTORY
                 sold_price REAL DEFAULT 0,
                 status TEXT DEFAULT 'Active', 
                 
@@ -53,6 +51,9 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
                 missing_parts TEXT, missing_parts_desc TEXT,
                 damaged TEXT, damage_desc TEXT,
                 item_notes TEXT, upc TEXT, asin TEXT, url TEXT,
+                
+                suggested_msrp REAL DEFAULT 0, -- NEW COLUMN
+                
                 is_watched INTEGER DEFAULT 0,
                 is_hidden INTEGER DEFAULT 0,
                 FOREIGN KEY (auction_id) REFERENCES auctions(id) ON DELETE CASCADE,
@@ -60,7 +61,8 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             )
         """)
         
-        # --- MIGRATION: Add columns if missing ---
+        # --- MIGRATIONS ---
+        # Defined INSIDE the 'with conn' block so it's safe
         cursor = conn.cursor()
         existing_cols = [row[1] for row in cursor.execute("PRAGMA table_info(auction_items)")]
         
@@ -72,6 +74,9 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             try: cursor.execute("ALTER TABLE auction_items ADD COLUMN status TEXT DEFAULT 'Active'")
             except sqlite3.OperationalError: pass
 
+        if 'suggested_msrp' not in existing_cols:
+            try: cursor.execute("ALTER TABLE auction_items ADD COLUMN suggested_msrp REAL DEFAULT 0")
+            except sqlite3.OperationalError: pass
 # ----------------------------------------------------------------------
 # WRITES
 # ----------------------------------------------------------------------
@@ -80,19 +85,21 @@ def insert_auction(conn, auction_id, url):
     conn.commit()
 
 def insert_auction_item(conn, auction_id, lot, current_bid, details: dict):
+    # Updated to include suggested_msrp
     conn.execute("""
         INSERT INTO auction_items (
             auction_id, lot, current_bid, title, brand, model,
             packaging, condition, functional, missing_parts, missing_parts_desc,
-            damaged, damage_desc, item_notes, upc, asin, url
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            damaged, damage_desc, item_notes, upc, asin, url, suggested_msrp
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         auction_id, lot, current_bid,
         details.get('Title'), details.get('Brand'), details.get('Model'),
         details.get('Packaging'), details.get('Condition'), details.get('Functional'),
         details.get('Missing Parts'), details.get('Missing Parts Description'),
         details.get('Damaged'), details.get('Damage Description'),
-        details.get('Notes'), details.get('UPC'), details.get('ASIN'), details.get('URL')
+        details.get('Notes'), details.get('UPC'), details.get('ASIN'), details.get('URL'),
+        details.get('SuggestedMSRP', 0) # NEW
     ))
     conn.commit()
 
@@ -155,10 +162,9 @@ def get_auction_items(conn, auction_id: int) -> pd.DataFrame:
             i.id, i.auction_id, i.product_id,
             i.lot as lot_number, 
             i.current_bid, 
-            
-            -- CRITICAL: Ensure these are selected
             i.sold_price, 
             i.status,
+            i.suggested_msrp,
             
             COALESCE(p.title, i.title) as title,
             COALESCE(p.brand, i.brand) as brand,
