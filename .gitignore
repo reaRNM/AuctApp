@@ -53,3 +53,7 @@ output/
 
 # Secrets
 .env
+
+# Manifest
+PROJECT_STATUS.md
+*.md

@@ -31,6 +31,54 @@ function(params) {
 }
 """)
 
+# === NEW: ACTIONS RENDERER (Open Link Button) ===
+JS_ACTIONS_RENDERER = JsCode("""
+class ActionsRenderer {
+    init(params) {
+        this.eGui = document.createElement('div');
+        this.eGui.style.display = 'flex';
+        this.eGui.style.justifyContent = 'center';
+        this.eGui.style.alignItems = 'center';
+        this.eGui.style.height = '100%';
+
+        // Link Button (🔗)
+        if (params.data.url) {
+            const linkBtn = document.createElement('a');
+            linkBtn.href = params.data.url;
+            linkBtn.target = "_blank";
+            linkBtn.innerText = "🔗";
+            linkBtn.style.textDecoration = "none";
+            linkBtn.style.fontSize = "16px";
+            linkBtn.style.cursor = "pointer";
+            linkBtn.title = "Open Auction Page";
+            this.eGui.appendChild(linkBtn);
+        }
+    }
+    getGui() { return this.eGui; }
+}
+""")
+
+# === NEW: PROFIT STYLING ===
+JS_PROFIT_STYLE = JsCode("""
+function(params) {
+    if (params.value > 0) return {'color': '#2e7d32', 'fontWeight': 'bold'}; // Green
+    if (params.value < 0) return {'color': '#c62828', 'fontWeight': 'bold'}; // Red
+    return {};
+}
+""")
+
+# === NEW: BID % STYLING (Warn if > 50% of MSRP) ===
+JS_BID_PERCENT_STYLE = JsCode("""
+function(params) {
+    // Remove % and parse
+    const val = parseFloat(String(params.value).replace('%',''));
+    if (val > 70) return {'color': '#c62828', 'fontWeight': 'bold'}; // High Risk
+    if (val > 50) return {'color': '#ef6c00', 'fontWeight': 'bold'}; // Warning
+    if (val > 0)  return {'color': '#2e7d32', 'fontWeight': 'bold'}; // Good deal
+    return {};
+}
+""")
+
 JS_STYLE_BAD_YES = JsCode("""function(params) { if (String(params.value).toLowerCase().trim() === 'yes') { return {'fontWeight': 'bold', 'color': '#b71c1c'}; } return {}; }""")
 JS_STYLE_BAD_NO = JsCode("""function(params) { if (String(params.value).toLowerCase().trim() === 'no') { return {'fontWeight': 'bold', 'color': '#b71c1c'}; } return {}; }""")
 JS_STYLE_BAD_COND = JsCode("""function(params) { if (String(params.value).toLowerCase().trim() === 'for parts only') { return {'fontWeight': 'bold', 'color': '#b71c1c'}; } return {}; }""")

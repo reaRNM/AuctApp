@@ -10,8 +10,12 @@ from components.research import render_research_station
 
 # === CONSTANTS ===
 COL_SELECT = "Select" # New
+COL_ACTIONS = "Actions" # New
 COL_LOT = "Lot"
 COL_BID = "Bid"
+COL_PROFIT = "Est. Profit" # New
+COL_BID_PCT = "Bid %"      # New
+COL_MSRP_STAT = "MSRP Status" # New
 COL_TITLE = "Title"
 COL_BRAND = "Brand"
 COL_MODEL = "Model"
@@ -28,6 +32,7 @@ COL_NOTES = "Notes"
 COL_UPC = "UPC"
 COL_ASIN = "ASIN"
 COL_URL = "URL"
+COL_MSRP_SUGG = "MSRP"
 
 st.set_page_config(page_title="Active Viewer", layout="wide")
 st.title("🔭 Active Auction Viewer")
@@ -64,13 +69,50 @@ if df.empty: st.warning("No items found."); st.stop()
 
 # Process
 df[COL_RISK] = df.apply(classify_risk, axis=1)
-if "current_bid" in df.columns:
-    df["current_bid"] = pd.to_numeric(df["current_bid"], errors="coerce").fillna(0.00)
-    df[COL_BID] = df["current_bid"].apply(lambda x: f"${x:,.2f}")
-df[COL_WATCH] = df["is_watched"].apply(lambda x: True if x == 1 else False)
 
-# ADD SELECT COLUMN (For Checkboxes)
+# Numeric Cleanup
+df["current_bid"] = pd.to_numeric(df["current_bid"], errors="coerce").fillna(0.00)
+df["suggested_msrp"] = pd.to_numeric(df["suggested_msrp"], errors="coerce").fillna(0.00)
+df["master_msrp"] = pd.to_numeric(df["master_msrp"], errors="coerce").fillna(0.00)
+df["master_target_price"] = pd.to_numeric(df["master_target_price"], errors="coerce").fillna(0.00)
+
+# 3. Determine "Working MSRP" (Use Master if exists, else Scraped)
+df["working_msrp"] = df["master_msrp"]
+df.loc[df["working_msrp"] == 0, "working_msrp"] = df["suggested_msrp"]
+
+
+# FIXED: Helper function to remove nested lambda complexity
+def determine_msrp_status(row):
+    if row["product_id"] and row["master_msrp"] > 0:
+        return "✅ Linked"
+    if row["suggested_msrp"] > 0:
+        return "⚠️ Scraped"
+    return "❌ Missing"
+
+df[COL_MSRP_STAT] = df.apply(determine_msrp_status, axis=1)
+
+# 5. Bid % Calculation
+df[COL_BID_PCT] = df.apply(
+    lambda x: f"{(x['current_bid'] / x['working_msrp']) * 100:.0f}%" 
+    if x['working_msrp'] > 0 else "-", axis=1
+)
+
+# 6. Profit Calculation
+# Profit = (Target Price OR MSRP) - Current Bid - (Estimate 20% Fees/Shipping Buffer)
+# If no target price, use 50% of MSRP as a safe estimate
+df["profit_val"] = df.apply(
+    lambda x: (x['master_target_price'] if x['master_target_price'] > 0 else x['working_msrp'] * 0.5) 
+    - x['current_bid'], axis=1
+)
+df[COL_PROFIT] = df["profit_val"].apply(lambda x: f"${x:,.2f}")
+
+# 7. Formatted Bid
+df[COL_BID] = df["current_bid"].apply(lambda x: f"${x:,.2f}")
+
+# 8. Watch/Select
+df[COL_WATCH] = df["is_watched"].apply(lambda x: True if x == 1 else False)
 df[COL_SELECT] = False 
+df[COL_ACTIONS] = "" # Placeholder for the JS Renderer
 
 # Rename
 rename_map = {
@@ -78,7 +120,7 @@ rename_map = {
     "packaging": COL_PACKAGING, "condition": COL_CONDITION, "functional": COL_FUNCTIONAL,
     "missing_parts": COL_MISSING, "missing_parts_desc": COL_MISSING_DESC,
     "damaged": COL_DAMAGED, "damage_desc": COL_DAMAGE_DESC,
-    "item_notes": COL_NOTES, "upc": COL_UPC, "asin": COL_ASIN, "url": COL_URL
+    "item_notes": COL_NOTES, "suggested_msrp": COL_MSRP_SUGG, "upc": COL_UPC, "asin": COL_ASIN, "url": COL_URL
 }
 df = df.rename(columns=rename_map)
 
@@ -91,17 +133,23 @@ if show_no_bids: df = df[df[COL_RISK] == "NO BIDS"]
 # Select Cols (Order matters!)
 desired_cols = [
     COL_SELECT, # 1. Explicit Select Column
+    COL_ACTIONS,
     COL_RISK,   # 2. Risk
     COL_WATCH,  # 3. Watch
     COL_LOT, 
+    COL_PROFIT,
     COL_BID, 
+    COL_BID_PCT, # New Bid %
+    COL_MSRP_STAT, # New Status
     COL_TITLE, COL_BRAND, COL_MODEL, 
     COL_PACKAGING, COL_CONDITION, COL_FUNCTIONAL, 
     COL_MISSING, COL_MISSING_DESC, 
     COL_DAMAGED, COL_DAMAGE_DESC, 
-    COL_NOTES, COL_UPC, COL_ASIN, COL_URL, 
-    "id", "is_hidden", "current_bid", "product_id"
+    COL_NOTES, COL_MSRP_SUGG, COL_UPC, COL_ASIN, COL_URL, 
+    "id", "is_hidden", "current_bid", "product_id", 
+    "master_msrp", "master_target_price", "profit_val"
 ]
+
 df_display = df[[c for c in desired_cols if c in df.columns]].copy()
 
 # --- RENDER GRID ---

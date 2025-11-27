@@ -166,11 +166,16 @@ def get_auction_items(conn, auction_id: int) -> pd.DataFrame:
             i.status,
             i.suggested_msrp,
             
+            -- COALESCE: Use Master Record if exists, otherwise raw Item record
             COALESCE(p.title, i.title) as title,
             COALESCE(p.brand, i.brand) as brand,
             COALESCE(p.model, i.model) as model,
             COALESCE(p.upc, i.upc) as upc,
             COALESCE(p.asin, i.asin) as asin,
+            
+            -- NEW: Pricing Data for Calculations
+            p.msrp as master_msrp,
+            p.target_list_price as master_target_price,
             
             i.packaging, i.condition, i.functional, 
             i.missing_parts, i.missing_parts_desc,
