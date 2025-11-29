@@ -15,6 +15,8 @@ def _clean_str(val: Any) -> Optional[str]:
             return s
     return None
 
+
+
 def _prepare_product_fields(data: Dict[str, Any]) -> Dict[str, Any]:
     """Extracts and cleans dictionary for DB insertion."""
     return {
@@ -35,6 +37,36 @@ def _prepare_product_fields(data: Dict[str, Any]) -> Dict[str, Any]:
         'height': data.get('height'),
         'is_irregular': 1 if data.get('is_irregular') else 0,
         'ship_method': data.get('ship_method'),
+        
+        # New eBay Fields
+        'ebay_url': data.get('ebay_url'),
+        'ebay_sold_30d': data.get('ebay_sold_30d'),
+        'ebay_sold_60d': data.get('ebay_sold_60d'),
+        'ebay_sold_90d': data.get('ebay_sold_90d'),
+        'ebay_num_sellers': data.get('ebay_num_sellers'),
+        'ebay_avg_sold': data.get('ebay_avg_sold'),
+        'ebay_low_sold': data.get('ebay_low_sold'),
+        'ebay_high_sold': data.get('ebay_high_sold'),
+        'ebay_avg_ship_sold': data.get('ebay_avg_ship_sold'),
+        'ebay_free_ship_pct_sold': data.get('ebay_free_ship_pct_sold'),
+        'ebay_ctr': data.get('ebay_ctr'),
+        'ebay_active_count': data.get('ebay_active_count'),
+        'ebay_avg_list': data.get('ebay_avg_list'),
+        'ebay_low_list': data.get('ebay_low_list'),
+        'ebay_high_list': data.get('ebay_high_list'),
+        'ebay_avg_ship_list': data.get('ebay_avg_ship_list'),
+        'ebay_free_ship_pct_list': data.get('ebay_free_ship_pct_list'),
+        'ebay_promoted_pct': data.get('ebay_promoted_pct'),
+
+        # New Amazon Fields
+        'amazon_url': data.get('amazon_url'),
+        'amazon_price': data.get('amazon_price'),
+        'amazon_stars': data.get('amazon_stars'),
+        'amazon_cat_rank': data.get('amazon_cat_rank'),
+        'amazon_subcat_rank': data.get('amazon_subcat_rank'),
+        'amazon_sold_30d': data.get('amazon_sold_30d'),
+        'amazon_freq_returned': 1 if data.get('amazon_freq_returned') else 0,
+        
         'notes': data.get('notes')
     }
 

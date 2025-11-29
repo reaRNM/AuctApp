@@ -403,6 +403,7 @@ def create_csv_row(lot_number: str, current_bid: float, parsed_data: dict) -> di
         'Title': parsed_data.get('Title'),
         'Brand': parsed_data.get('Brand'),
         'Model': parsed_data.get('Model'),
+        'Category': parsed_data.get('Category'),
         'Packaging': parsed_data.get('Packaging'),        
         'Condition': parsed_data.get('Condition'),
         'Functional': parsed_data.get('Functional'),
@@ -422,6 +423,7 @@ def handle_database_insert(
     auction_id: int,
     lot_number: str,
     current_bid: float,
+    category: float,
     parsed_data: dict, 
 ) -> None:
     """Insert item directly into the flat table."""
@@ -434,9 +436,17 @@ def process_items(conn, auction_id: int, items: list) -> None:
     for item in items:
         lot_number = item['lotNumber']
         current_bid = get_current_bid(item)
+        category = item['category']
         parsed = parse_description(item['description'])
-        insert_auction_item(conn, auction_id, lot_number, current_bid, parsed)
 
+# EXTRACT CATEGORY
+        cat_obj = item.get('primaryCategory')
+        if cat_obj and 'name' in cat_obj:
+            parsed['Category'] = cat_obj['name']
+        else:
+            parsed['Category'] = "Uncategorized"
+
+        insert_auction_item(conn, auction_id, lot_number, current_bid, parsed)
 
 def create_request_payload(auction_id: int) -> dict:
     """Build the GraphQL payload."""

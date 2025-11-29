@@ -1,5 +1,7 @@
+# components/grid_styles.py
 from st_aggrid import JsCode
 
+# 1. RENDERERS
 JS_EMPTY_TEXT = JsCode("""function(params) { return ""; }""")
 
 JS_CHECKBOX_RENDERER = JsCode("""
@@ -19,19 +21,6 @@ class CheckboxRenderer {
 }
 """)
 
-JS_ROW_STYLE = JsCode("""
-function(params) {
-    if (params.data.is_hidden === 1) {
-        return {'color': '#9e9e9e', 'backgroundColor': '#f5f5f5', 'text-decoration': 'line-through', 'font-style': 'italic'};
-    }
-    if (params.data.Risk === 'HIGH RISK') return {'backgroundColor': '#ffcdd2', 'color': 'black'}; 
-    if (params.data.Risk === 'MEDIUM RISK') return {'backgroundColor': '#ffe0b2', 'color': 'black'}; 
-    if (params.data.Risk === 'NO BIDS') return {'backgroundColor': '#e3f2fd', 'color': 'black'}; 
-    return {};
-}
-""")
-
-# === NEW: ACTIONS RENDERER (Open Link Button) ===
 JS_ACTIONS_RENDERER = JsCode("""
 class ActionsRenderer {
     init(params) {
@@ -41,7 +30,6 @@ class ActionsRenderer {
         this.eGui.style.alignItems = 'center';
         this.eGui.style.height = '100%';
 
-        // Link Button (🔗)
         if (params.data.url) {
             const linkBtn = document.createElement('a');
             linkBtn.href = params.data.url;
@@ -58,23 +46,25 @@ class ActionsRenderer {
 }
 """)
 
-# === NEW: PROFIT STYLING ===
-JS_PROFIT_STYLE = JsCode("""
+# 2. ROW STYLING
+JS_ROW_STYLE = JsCode("""
 function(params) {
-    if (params.value > 0) return {'color': '#2e7d32', 'fontWeight': 'bold'}; // Green
-    if (params.value < 0) return {'color': '#c62828', 'fontWeight': 'bold'}; // Red
+    if (params.data.is_hidden === 1) {
+        return {'color': '#9e9e9e', 'backgroundColor': '#f5f5f5', 'text-decoration': 'line-through', 'font-style': 'italic'};
+    }
+    if (params.data.Risk === 'HIGH RISK') return {'backgroundColor': '#ffcdd2', 'color': 'black'}; 
+    if (params.data.Risk === 'MEDIUM RISK') return {'backgroundColor': '#ffe0b2', 'color': 'black'}; 
+    if (params.data.Risk === 'NO BIDS') return {'backgroundColor': '#e3f2fd', 'color': 'black'}; 
     return {};
 }
 """)
 
-# === NEW: BID % STYLING (Warn if > 50% of MSRP) ===
-JS_BID_PERCENT_STYLE = JsCode("""
+# 3. CELL STYLING
+JS_RISK_CELL_STYLE = JsCode("""
 function(params) {
-    // Remove % and parse
-    const val = parseFloat(String(params.value).replace('%',''));
-    if (val > 70) return {'color': '#c62828', 'fontWeight': 'bold'}; // High Risk
-    if (val > 50) return {'color': '#ef6c00', 'fontWeight': 'bold'}; // Warning
-    if (val > 0)  return {'color': '#2e7d32', 'fontWeight': 'bold'}; // Good deal
+    if (params.value === 'HIGH RISK') return {'color': '#d32f2f', 'fontWeight': 'bold'};
+    if (params.value === 'MEDIUM RISK') return {'color': '#e65100', 'fontWeight': 'bold'};
+    if (params.value === 'NO BIDS') return {'color': '#1565c0', 'fontWeight': 'bold'};
     return {};
 }
 """)
@@ -83,5 +73,55 @@ JS_STYLE_BAD_YES = JsCode("""function(params) { if (String(params.value).toLower
 JS_STYLE_BAD_NO = JsCode("""function(params) { if (String(params.value).toLowerCase().trim() === 'no') { return {'fontWeight': 'bold', 'color': '#b71c1c'}; } return {}; }""")
 JS_STYLE_BAD_COND = JsCode("""function(params) { if (String(params.value).toLowerCase().trim() === 'for parts only') { return {'fontWeight': 'bold', 'color': '#b71c1c'}; } return {}; }""")
 
+JS_PROFIT_STYLE = JsCode("""
+function(params) {
+    if (params.value > 0) return {'color': '#2e7d32', 'fontWeight': 'bold'};
+    if (params.value < 0) return {'color': '#c62828', 'fontWeight': 'bold'};
+    return {};
+}
+""")
+
+JS_BID_PERCENT_STYLE = JsCode("""
+function(params) {
+    const val = parseFloat(String(params.value).replace('%',''));
+    if (val > 70) return {'color': '#c62828', 'fontWeight': 'bold'};
+    if (val > 50) return {'color': '#ef6c00', 'fontWeight': 'bold'};
+    if (val > 0)  return {'color': '#2e7d32', 'fontWeight': 'bold'};
+    return {};
+}
+""")
+
+# 4. SORTERS
 JS_NATURAL_SORT = JsCode(r"""function(a,b){return a.localeCompare(b, undefined, {numeric: true, sensitivity: 'base'});}""")
 JS_CURRENCY_SORT = JsCode(r"""function(a,b){return (parseFloat(String(a).replace(/[$,]/g,''))||0) - (parseFloat(String(b).replace(/[$,]/g,''))||0);}""")
+
+# 5. PERSISTENCE
+def get_persistence_js(grid_id):
+    """Returns the JsCode needed to save/restore state for a specific grid ID."""
+    return JsCode(f"""
+    function(params) {{
+        const gridId = '{grid_id}';
+        const storageKey = 'auctapp_state_' + gridId;
+
+        const savedState = localStorage.getItem(storageKey);
+        if (savedState) {{
+            const state = JSON.parse(savedState);
+            if (state.colState) {{ params.api.setColumnState(state.colState); }}
+            if (state.filterState) {{ params.api.setFilterModel(state.filterState); }}
+        }}
+
+        function saveState() {{
+            const state = {{
+                colState: params.api.getColumnState(),
+                filterState: params.api.getFilterModel()
+            }};
+            localStorage.setItem(storageKey, JSON.stringify(state));
+        }}
+
+        params.api.addEventListener('columnVisible', saveState);
+        params.api.addEventListener('columnPinned', saveState);
+        params.api.addEventListener('columnResized', saveState);
+        params.api.addEventListener('columnMoved', saveState);
+        params.api.addEventListener('filterChanged', saveState);
+    }}
+    """)
