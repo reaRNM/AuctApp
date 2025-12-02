@@ -21,6 +21,7 @@ class CheckboxRenderer {
 }
 """)
 
+# FIXED: Checks for 'URL' (Display Name) OR 'url' (DB Name)
 JS_ACTIONS_RENDERER = JsCode("""
 class ActionsRenderer {
     init(params) {
@@ -30,9 +31,12 @@ class ActionsRenderer {
         this.eGui.style.alignItems = 'center';
         this.eGui.style.height = '100%';
 
-        if (params.data.url) {
+        // Check both case variations just to be safe
+        const linkUrl = params.data.URL || params.data.url;
+
+        if (linkUrl) {
             const linkBtn = document.createElement('a');
-            linkBtn.href = params.data.url;
+            linkBtn.href = linkUrl;
             linkBtn.target = "_blank";
             linkBtn.innerText = "🔗";
             linkBtn.style.textDecoration = "none";
@@ -97,7 +101,6 @@ JS_CURRENCY_SORT = JsCode(r"""function(a,b){return (parseFloat(String(a).replace
 
 # 5. PERSISTENCE
 def get_persistence_js(grid_id):
-    """Returns the JsCode needed to save/restore state for a specific grid ID."""
     return JsCode(f"""
     function(params) {{
         const gridId = '{grid_id}';

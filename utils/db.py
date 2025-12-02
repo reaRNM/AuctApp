@@ -10,65 +10,38 @@ def create_connection(db_path: str = "auctions.db") -> sqlite3.Connection:
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
     with conn:
+        # 1. AUCTIONS (Updated with Title)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS auctions (
                 id INTEGER PRIMARY KEY,
                 url TEXT UNIQUE,
-                scrape_date TEXT DEFAULT CURRENT_TIMESTAMP
+                scrape_date TEXT DEFAULT CURRENT_TIMESTAMP,
+                auctioneer TEXT,
+                auction_title TEXT, -- NEW
+                end_date TEXT
             )
         """)
 
-        # 2. PRODUCTS (Master Library - Updated with User's Exact Fields)
+        # 2. PRODUCTS
         conn.execute("""
             CREATE TABLE IF NOT EXISTS products (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                
-                -- Identity
                 title TEXT, brand TEXT, model TEXT,
                 upc TEXT UNIQUE, asin TEXT UNIQUE, category TEXT,
-                
-                -- Internal Pricing
                 msrp REAL, avg_sold_price REAL, target_list_price REAL,
                 shipping_cost_basis REAL,
-                
-                -- Logistics
                 weight_lbs REAL, weight_oz REAL,
                 length REAL, width REAL, height REAL,
                 is_irregular BOOLEAN DEFAULT 0, ship_method TEXT,
-                
-                -- EBAY RESEARCH (Exact User List)
-                ebay_sold_30d INTEGER,          -- 1a. # Sold Last Month
-                ebay_sold_60d INTEGER,          -- 1b. # Sold Last 60 Days
-                ebay_sold_90d INTEGER,          -- 1c. # Sold Last 90 Days
-                ebay_num_sellers INTEGER,       -- 2. Number of Sellers
-                ebay_avg_sold REAL,             -- 3. Avg Price Sold
-                ebay_low_sold REAL,             -- 4. Lowest Price Sold
-                ebay_high_sold REAL,            -- 5. Highest Price Sold
-                ebay_avg_ship_sold REAL,        -- 6. Avg Shipping (Sold)
-                ebay_free_ship_pct_sold REAL,   -- 7. % Free Shipping (Sold)
-                ebay_ctr REAL,                  -- 8. Click Through Rate
-                ebay_active_count INTEGER,      -- 9. Number of Current Listings
-                ebay_avg_list REAL,             -- 10. Avg Listing Price
-                ebay_low_list REAL,             -- 11. Lowest Listing Price
-                ebay_high_list REAL,            -- 12. Highest Listing Price
-                ebay_avg_ship_list REAL,        -- 13. Avg Shipping (Listing)
-                ebay_free_ship_pct_list REAL,   -- 14. % Free Shipping (List)
-                ebay_promoted_pct REAL,         -- 15. % Promoted Rate
-                ebay_url TEXT,                  -- (Keep URL for reference)
-
-                -- AMAZON RESEARCH (Exact User List)
-                amazon_price REAL,              -- 1. Price
-                amazon_stars REAL,              -- 2. Star Rating
-                amazon_cat_rank TEXT,           -- 3. Ranking in Categories
-                amazon_subcat_rank TEXT,        -- 4. Ranking in Subcategories
-                amazon_sold_30d INTEGER,        -- 5. # Sold Last Month
-                amazon_freq_returned BOOLEAN DEFAULT 0, -- 6. Frequently Returned
-                amazon_url TEXT,                -- (Keep URL)
-                
+                ebay_url TEXT, ebay_active_low REAL, ebay_active_high REAL,
+                ebay_sold_low REAL, ebay_sold_high REAL, ebay_sell_through REAL,
+                amazon_url TEXT, amazon_new_price REAL, amazon_used_price REAL,
+                amazon_sales_rank INTEGER,
                 notes TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
         """)
 
+        # 3. AUCTION ITEMS
         conn.execute("""
             CREATE TABLE IF NOT EXISTS auction_items (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -88,11 +61,35 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             )
         """)
         
+        # --- MIGRATIONS ---
         cursor = conn.cursor()
         
-        # Add new eBay columns
+        # Add auction_title if missing
+        auc_cols = [row[1] for row in cursor.execute("PRAGMA table_info(auctions)")]
+        if 'auction_title' not in auc_cols:
+            try: cursor.execute("ALTER TABLE auctions ADD COLUMN auction_title TEXT")
+            except sqlite3.OperationalError: pass
+        if 'auctioneer' not in auc_cols:
+            try: cursor.execute("ALTER TABLE auctions ADD COLUMN auctioneer TEXT")
+            except sqlite3.OperationalError: pass
+        if 'end_date' not in auc_cols:
+            try: cursor.execute("ALTER TABLE auctions ADD COLUMN end_date TEXT")
+            except sqlite3.OperationalError: pass
+
+        # Item Migrations
+        item_cols = [row[1] for row in cursor.execute("PRAGMA table_info(auction_items)")]
+        for col, dtype in {'sold_price': 'REAL', 'status': 'TEXT', 'suggested_msrp': 'REAL', 'scraped_category': 'TEXT'}.items():
+            if col not in item_cols:
+                try: cursor.execute(f"ALTER TABLE auction_items ADD COLUMN {col} {dtype}")
+                except sqlite3.OperationalError: pass
+
+        # Product Migrations
         prod_cols = [row[1] for row in cursor.execute("PRAGMA table_info(products)")]
         new_prod_cols = {
+            'ebay_url': 'TEXT', 'ebay_active_low': 'REAL', 'ebay_active_high': 'REAL',
+            'ebay_sold_low': 'REAL', 'ebay_sold_high': 'REAL', 'ebay_sell_through': 'REAL',
+            'amazon_url': 'TEXT', 'amazon_new_price': 'REAL', 'amazon_used_price': 'REAL',
+            'amazon_sales_rank': 'INTEGER',
             'ebay_sold_30d': 'INTEGER', 'ebay_sold_60d': 'INTEGER', 'ebay_sold_90d': 'INTEGER',
             'ebay_num_sellers': 'INTEGER', 'ebay_avg_sold': 'REAL', 'ebay_low_sold': 'REAL', 'ebay_high_sold': 'REAL',
             'ebay_avg_ship_sold': 'REAL', 'ebay_free_ship_pct_sold': 'REAL', 'ebay_ctr': 'REAL',
@@ -105,36 +102,19 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             if col not in prod_cols:
                 try: cursor.execute(f"ALTER TABLE products ADD COLUMN {col} {dtype}")
                 except sqlite3.OperationalError: pass
-        
-        item_cols = [row[1] for row in cursor.execute("PRAGMA table_info(auction_items)")]
-        
-        # Migrations
-        migrations = {
-            'sold_price': 'REAL DEFAULT 0',
-            'status': "TEXT DEFAULT 'Active'",
-            'suggested_msrp': 'REAL DEFAULT 0',
-            'scraped_category': 'TEXT' # Add new migration
-        }
-        for col, dtype in migrations.items():
-            if col not in item_cols:
-                try: cursor.execute(f"ALTER TABLE auction_items ADD COLUMN {col} {dtype}")
-                except sqlite3.OperationalError: pass
 
-        prod_cols = [row[1] for row in cursor.execute("PRAGMA table_info(products)")]
-        new_prod_cols = {
-            'ebay_url': 'TEXT', 'ebay_active_low': 'REAL', 'ebay_active_high': 'REAL',
-            'ebay_sold_low': 'REAL', 'ebay_sold_high': 'REAL', 'ebay_sell_through': 'REAL',
-            'amazon_url': 'TEXT', 'amazon_new_price': 'REAL', 'amazon_used_price': 'REAL',
-            'amazon_sales_rank': 'INTEGER'
-        }
-        for col, dtype in new_prod_cols.items():
-            if col not in prod_cols:
-                try: cursor.execute(f"ALTER TABLE products ADD COLUMN {col} {dtype}")
-                except sqlite3.OperationalError: pass
-
-# ... (insert_auction remains same) ...
+# --- WRITES ---
 def insert_auction(conn, auction_id, url):
     conn.execute("INSERT OR IGNORE INTO auctions (id, url) VALUES (?, ?)", (auction_id, url))
+    conn.commit()
+
+# NEW: Added title to update function
+def update_auction_metadata(conn, auction_id, title, auctioneer, end_date):
+    conn.execute("""
+        UPDATE auctions 
+        SET auction_title = ?, auctioneer = ?, end_date = ? 
+        WHERE id = ?
+    """, (title, auctioneer, end_date, auction_id))
     conn.commit()
 
 def insert_auction_item(conn, auction_id, lot, current_bid, details: dict):
@@ -152,8 +132,7 @@ def insert_auction_item(conn, auction_id, lot, current_bid, details: dict):
         details.get('Missing Parts'), details.get('Missing Parts Description'),
         details.get('Damaged'), details.get('Damage Description'),
         details.get('Notes'), details.get('UPC'), details.get('ASIN'), details.get('URL'),
-        details.get('SuggestedMSRP', 0),
-        details.get('Category') # New Field
+        details.get('SuggestedMSRP', 0), details.get('Category')
     ))
     conn.commit()
 
@@ -178,10 +157,10 @@ def update_final_price(conn, auction_id: int, lot_number: str, sold_price: float
     """, (sold_price, status, auction_id, lot_number))
     conn.commit()
 
-# ... (Getters remain largely same, just updated column list) ...
+# --- READS (Updated with Title) ---
 def get_active_auctions(conn) -> pd.DataFrame:
     return pd.read_sql_query("""
-        SELECT a.id, a.url, a.scrape_date, COUNT(i.id) AS item_count
+        SELECT a.id, a.url, a.scrape_date, a.auction_title, a.auctioneer, a.end_date, COUNT(i.id) AS item_count
         FROM auctions a
         LEFT JOIN auction_items i ON i.auction_id = a.id
         GROUP BY a.id, a.url, a.scrape_date
@@ -191,7 +170,7 @@ def get_active_auctions(conn) -> pd.DataFrame:
 
 def get_closed_auctions(conn) -> pd.DataFrame:
     return pd.read_sql_query("""
-        SELECT a.id, a.url, a.scrape_date, COUNT(i.id) AS item_count
+        SELECT a.id, a.url, a.scrape_date, a.auction_title, a.auctioneer, a.end_date, COUNT(i.id) AS item_count
         FROM auctions a
         LEFT JOIN auction_items i ON i.auction_id = a.id
         GROUP BY a.id, a.url, a.scrape_date
@@ -209,7 +188,7 @@ def get_auction_items(conn, auction_id: int) -> pd.DataFrame:
             i.lot as lot_number, 
             i.current_bid, i.sold_price, i.status, 
             i.suggested_msrp,
-            i.scraped_category, -- NEW
+            i.scraped_category,
             
             COALESCE(p.title, i.title) as title,
             COALESCE(p.brand, i.brand) as brand,
@@ -217,8 +196,6 @@ def get_auction_items(conn, auction_id: int) -> pd.DataFrame:
             COALESCE(p.upc, i.upc) as upc,
             COALESCE(p.asin, i.asin) as asin,
             COALESCE(p.category, i.scraped_category) as category,
-            
-            
             
             p.msrp as master_msrp,
             p.target_list_price as master_target_price,

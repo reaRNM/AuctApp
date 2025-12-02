@@ -6,7 +6,7 @@ OPT_CONDITION = ["Excellent", "New (Other)", "Used", "For Parts Only", "Bad", "O
 OPT_FUNCTIONAL = ["Yes", "No", "Unknown", "Unable to Test"]
 OPT_YES_NO = ["Yes", "No", "Unknown"]
 
-
+# (OPT_CATEGORIES removed since we are using scraped data now)
 
 def configure_column_editors(gb):
     """
@@ -41,11 +41,9 @@ def configure_column_editors(gb):
             cellEditorParams={"values": OPT_YES_NO}
         )
 
-    # FIXED: Re-enabled editing for Identity Fields (Title, Brand, etc.)
-    # This allows you to clean data directly in the Viewer grid.
+    # FIXED: Removed "Category" from this list so it is NOT editable
     text_fields = [
-        "Title", "Brand", "Model", "UPC", "ASIN",
-        "Category",
+        "Title", "Brand", "Model", "UPC", "ASIN", 
         "Notes", "Missing Parts Desc", "Damaged Desc"
     ]
     for col in text_fields:

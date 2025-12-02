@@ -1,4 +1,4 @@
-# pages/3_Auction_History.py
+# pages/2_Auction_History.py
 import streamlit as st
 import pandas as pd
 import sys
@@ -12,11 +12,14 @@ from components.grid_styles import JS_CURRENCY_SORT, JS_NATURAL_SORT, JS_PROFIT_
 from components.research import render_research_station
 from utils.inventory import auto_link_products
 
+# CONSTANTS
 COL_LOT = "Lot"
 COL_SOLD = "Sold Price"
 COL_STATUS = "Status"
 COL_TITLE = "Title"
 COL_PROFIT = "Realized Profit"
+COL_MSRP_STAT = "MSRP Status"
+COL_MSRP = "MSRP" # New
 
 # ----------------------------------------------------------------------
 # HELPER FUNCTIONS
@@ -31,11 +34,27 @@ def render_history_grid(df: pd.DataFrame):
                 "master_msrp", "master_target_price", "suggested_msrp", "profit_val"]:
         if col in df.columns: gb.configure_column(col, hide=True)
 
-    # Sorters & Styles
-    if COL_LOT in df.columns: gb.configure_column(COL_LOT, comparator=JS_NATURAL_SORT)
-    if "Display_Sold" in df.columns: gb.configure_column("Display_Sold", comparator=JS_CURRENCY_SORT, headerName="Sold Price")
-    if COL_PROFIT in df.columns: gb.configure_column(COL_PROFIT, comparator=JS_CURRENCY_SORT, cellStyle=JS_PROFIT_STYLE)
+    # === COLUMN SIZING (FIXED) ===
+    # Making these columns explicitly smaller as requested
+    if COL_LOT in df.columns: 
+        gb.configure_column(COL_LOT, width=80, comparator=JS_NATURAL_SORT)
+    
+    if COL_STATUS in df.columns: 
+        gb.configure_column(COL_STATUS, width=100)
+        
+    if "Display_Sold" in df.columns: 
+        gb.configure_column("Display_Sold", width=100, comparator=JS_CURRENCY_SORT, headerName="Sold")
+        
+    if COL_PROFIT in df.columns: 
+        gb.configure_column(COL_PROFIT, width=100, comparator=JS_CURRENCY_SORT, cellStyle=JS_PROFIT_STYLE)
+        
+    if COL_MSRP in df.columns:
+        gb.configure_column(COL_MSRP, width=100)
 
+    if COL_TITLE in df.columns:
+        gb.configure_column(COL_TITLE, width=350, wrapText=True, autoHeight=True)
+
+    # Styles
     status_style = JsCode("""
         function(params) {
             if (params.value === 'Sold') return {color: 'green', fontWeight: 'bold'};
@@ -69,7 +88,17 @@ def _get_auction_selection(conn):
         return None
 
     st.sidebar.header("History Selection")
-    options = {f"{r['id']} – {r['url']}": r["id"] for _, r in auctions.iterrows()}
+    
+    # === NEW: HUMAN READABLE NAMES ===
+    # Format: "Auctioneer Name - Date (ID)"
+    # If name/date missing (old scrape), fallback to ID
+    options = {}
+    for _, r in auctions.iterrows():
+        label = f"{r['id']} - {r['url']}" # Fallback
+        if r['auctioneer'] and r['end_date']:
+            label = f"{r['auctioneer']} - {r['end_date']} (ID: {r['id']})"
+        options[label] = r["id"]
+        
     selected = st.sidebar.selectbox("Select Closed Auction", list(options.keys()))
     return options[selected]
 
@@ -82,10 +111,18 @@ def _load_and_process_data(conn, auction_id):
     df["master_msrp"] = pd.to_numeric(df["master_msrp"], errors="coerce").fillna(0.00)
     df["master_target_price"] = pd.to_numeric(df["master_target_price"], errors="coerce").fillna(0.00)
 
-    # MSRP & Profit Calcs
+    # MSRP & Profit
     df["working_msrp"] = df["master_msrp"]
     df.loc[df["working_msrp"] == 0, "working_msrp"] = df["suggested_msrp"]
+    
+    # NEW: Display MSRP
+    df[COL_MSRP] = df["working_msrp"].apply(lambda x: f"${x:,.2f}" if x > 0 else "-")
 
+    def determine_msrp_status(row):
+        if row["product_id"] and row["master_msrp"] > 0: return "✅ Linked"
+        if row["suggested_msrp"] > 0: return "⚠️ Scraped"
+        return "❌ Missing"
+    df[COL_MSRP_STAT] = df.apply(determine_msrp_status, axis=1)
 
     df["profit_val"] = df.apply(
         lambda x: (x['master_target_price'] if x['master_target_price'] > 0 else x['working_msrp'] * 0.5) 
@@ -106,8 +143,8 @@ def _load_and_process_data(conn, auction_id):
         
     return df
 
+# ... (Keep _perform_bulk_update and _handle_sidebar_actions unchanged) ...
 def _perform_bulk_update(conn, selected_rows, title, brand, model):
-    """Helper to execute the bulk update loop."""
     progress = st.sidebar.progress(0)
     total = len(selected_rows)
     for i, row in enumerate(selected_rows):
@@ -120,21 +157,15 @@ def _perform_bulk_update(conn, selected_rows, title, brand, model):
     st.rerun()
 
 def _handle_sidebar_actions(conn, selected_rows, auction_id):
-    """Handles Bulk Edit and Auto-Match buttons in sidebar."""
     st.sidebar.divider()
-    
-    # 1. Bulk Edit
     if len(selected_rows) > 1:
         st.sidebar.subheader(f"✏️ Bulk Edit ({len(selected_rows)} Items)")
         with st.sidebar.form("bulk_history_edit"):
             b_title = st.text_input("Title")
             b_brand = st.text_input("Brand")
             b_model = st.text_input("Model")
-            
             if st.form_submit_button("Update Items"):
                 _perform_bulk_update(conn, selected_rows, b_title, b_brand, b_model)
-    
-    # 2. Auto-Match
     st.sidebar.divider()
     if st.sidebar.button("🔗 Auto-Match History"):
         with st.spinner("Linking..."):
@@ -142,9 +173,6 @@ def _handle_sidebar_actions(conn, selected_rows, auction_id):
         st.sidebar.success(f"Linked {count} items!")
         st.rerun()
 
-# ----------------------------------------------------------------------
-# MAIN ORCHESTRATOR
-# ----------------------------------------------------------------------
 def main():
     st.set_page_config(page_title="Auction History", layout="wide")
     st.title("🏆 Auction Results & History")
@@ -155,13 +183,12 @@ def main():
         if not auction_id: return
 
         df = _load_and_process_data(conn, auction_id)
-        if df.empty:
-            st.warning("No items found.")
-            return
+        if df.empty: st.warning("No items found."); return
 
+        # FIXED: Added MSRP to display cols
         display_cols = [
-            COL_LOT, COL_STATUS, "Display_Sold", 
-            COL_PROFIT,
+            COL_LOT, COL_STATUS, "Display_Sold", COL_MSRP, # Added MSRP here
+            COL_PROFIT, COL_MSRP_STAT, 
             COL_TITLE, "Brand", "Model", 
             "id", "product_id"
         ]

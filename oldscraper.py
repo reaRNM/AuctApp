@@ -1,29 +1,23 @@
-
 import requests
 import pandas as pd
 import json
 import argparse
 import re  # For regex
-import time
 import os
-from typing import Optional, Dict, Any
-from utils.db import create_connection, ensure_schema, insert_auction_item, insert_auction, update_auction_metadata
-from dotenv import load_dotenv
-
-# Create output directory just in case
 os.makedirs("output", exist_ok=True)
+from utils.db import create_connection, ensure_schema, insert_auction_item, insert_auction
+from dotenv import load_dotenv
 
 load_dotenv()
 
-
 # === CONFIGURATION ===
+
 BEARER_TOKEN = os.getenv("HIBID_TOKEN")
 
 if not BEARER_TOKEN:
     raise ValueError("Error: HIBID_TOKEN not found in .env file")
   
-  
-graphql_url = "https://hibid.com/graphql"
+graphql_url = "<https://hibid.com/graphql>"
 
 headers_template = {
     'authority': 'hibid.com',
@@ -35,7 +29,7 @@ headers_template = {
     'accept-language': 'en-US,en;q=0.9',
     'authorization': BEARER_TOKEN,
     'content-type': 'application/json',
-    'origin': 'https://hibid.com',
+    'origin': '<https://hibid.com>',
     'sec-ch-ua': '"Chromium";v="134", "Not:A-Brand";v="24", "Google Chrome";v="134"',
     'sec-ch-ua-mobile': '?0',
     'sec-ch-ua-platform': '"Chrome OS"',
@@ -73,7 +67,6 @@ cookies = {
     '_derived_epik': 'dj0yJnU9TnZwTDhrYVVpMU40anBnNTVTcHNhWTl6eEprQVlQS0wmbj16MEdISkQ1UGZNSDFkemNqU2ZnMTNBJm09MSZ0PUFBQUFBR2ZCaUpVJnJtPTEmcnQ9QUFBQUFHZkJpSlUmc3A9Mg',
 }
 
-# UPDATED QUERY: Now includes the correct "category" structure
 query = """
     query LotSearch($auctionId: Int = null, $pageNumber: Int!, $pageLength: Int!, $category: CategoryId = null, $searchText: String = null, $zip: String = null, $miles: Int = null, $shippingOffered: Boolean = false, $countryName: String = null, $status: AuctionLotStatus = null, $sortOrder: EventItemSortOrder = null, $filter: AuctionLotFilter = null, $isArchive: Boolean = false, $dateStart: DateTime, $dateEnd: DateTime, $countAsView: Boolean = true, $hideGoogle: Boolean = false) {
       lotSearch(
@@ -88,11 +81,6 @@ query = """
           totalCount
           filteredCount
           results {
-            category {
-              categoryName
-              fullCategory
-              __typename
-            }
             auction {
               ...auctionMinimum
               __typename
@@ -308,23 +296,36 @@ query = """
 """
 
 # === CONSTANTS ===
+
 DAMAGE_DESCRIPTION = "Damage Description"
 MISSING_PARTS_DESCRIPTION = "Missing Parts Description"
 MISSING_PARTS = "Missing Parts"
 
-# Regex for extracting MSRP from title ($123 Title)
+# === NEW REGEX FOR MSRP ===
+
+# Matches "$320 Title" or "$1,200.00 Title"
+
 PRICE_PATTERN = re.compile(r'^\s*\$(\d+(?:,\d+)*(?:\.\d+)?)\s+(.*)')
 
-# === HELPER FUNCTIONS ===
+# === FUNCTION TO EXTRACT AUCTION ID FROM URL ===
+
 def extract_auction_id(url: str) -> int:
+    """Extract numeric auction ID from a HiBid URL."""
     pattern = r'/catalog/(\d+)|/lots/(\d+)'
     m = re.search(pattern, url)
-    if not m: raise ValueError("Could not extract auction ID from URL")
+    if not m:
+        raise ValueError("Could not extract auction ID from URL. Check format.")
     return int(m.group(1) or m.group(2))
 
 def get_current_bid(item: dict) -> float:
+    """
+    Return actual current bid.
+    If no bids exist (bidCount == 0), return 0.0.
+    Do NOT fallback to minBid (Starting Price).
+    """
     lot_state = item.get('lotState', {})
     bid_count = lot_state.get('bidCount', 0)
+
     if bid_count > 0:
         return lot_state.get('highBid', 0.0)
     return 0.0
@@ -333,172 +334,220 @@ def parse_description(description_text: str) -> dict:
     lines = description_text.splitlines()
     data = {}
     field_mappings = {
-        "Title:": ("Title", 6), 
+        "Title:": ("Title", 6),
         "Brand:": ("Brand", 6),
         "Model:": ("Model", 6),
         "In Packaging?:": ("Packaging", 14),
         "Condition:": ("Condition", 10),
         "Functional?:": ("Functional", 12),
-        "Missing Parts?:": ("Missing Parts", 15),
-        "Missing Parts Description:": ("Missing Parts Description", 26),
-        "Damaged?:": ("Damaged", 9), 
-        "Damage Description:": ("Damage Description", 19),
-        "Notes:": ("Notes", 6), 
+        "Missing Parts?:": (MISSING_PARTS, 15),
+        "Missing Parts Description:": (MISSING_PARTS_DESCRIPTION, 26),
+        "Damaged?:": ("Damaged", 9),
+        "Damage Description:": (DAMAGE_DESCRIPTION, 19),
+        "Notes:": ("Notes", 6),
         "UPC:": ("UPC", 4),
         "ASIN:": ("ASIN", 5),
         "Retailer Item URL:": ("URL", 18),
     }
+
     for line in lines:
         line = line.strip()
         for prefix, (key, offset) in field_mappings.items():
             if line.startswith(prefix):
-                data[key] = line[offset:].strip()
+                val = line[offset:].strip()
+                data[key] = val
                 break
     
+    # === NEW: Smart MSRP Extraction ===
+    # Check if Title starts with a price
     if 'Title' in data:
-        match = PRICE_PATTERN.match(data['Title'])
+        raw_title = data['Title']
+        match = PRICE_PATTERN.match(raw_title)
         if match:
+            price_str = match.group(1).replace(',', '') # Extract price part
+            clean_title = match.group(2).strip()        # Extract rest of title
+            
             try:
-                data['SuggestedMSRP'] = float(match.group(1).replace(',', ''))
-                data['Title'] = match.group(2).strip()
-            except ValueError: pass
+                data['SuggestedMSRP'] = float(price_str)
+                data['Title'] = clean_title # Overwrite with clean title
+            except ValueError:
+                pass # If parse fails, keep original
+                
     return data
+
+def build_condition_notes(parsed_data: dict) -> str:
+    """Create the pipe-separated condition string for the DB."""
+    order = [
+        ("Packaging", "Packaging"),
+        ("Condition", "Condition"),
+        ("Functional", "Functional"),
+        (MISSING_PARTS, MISSING_PARTS),
+        (MISSING_PARTS_DESCRIPTION, MISSING_PARTS_DESCRIPTION),
+        ("Damaged", "Damaged"),
+        (DAMAGE_DESCRIPTION, DAMAGE_DESCRIPTION),
+        ("Notes", "Notes"),
+        ("UPC", "UPC"),
+        ("ASIN", "ASIN"),
+        ("Retailer Item URL", "URL"),
+    ]
+    parts = [f"{label}: {parsed_data[k]}" for label, k in order if parsed_data.get(k)]
+    return " | ".join(parts)
+
+def create_csv_row(lot_number: str, current_bid: float, parsed_data: dict) -> dict:
+    """One row for the final CSV."""
+    return {
+        'Lot Number': lot_number,
+        'Current Bid': current_bid if abs(current_bid) > 1e-9 else "0",
+        'Title': parsed_data.get('Title'),
+        'Brand': parsed_data.get('Brand'),
+        'Model': parsed_data.get('Model'),
+        'Category': parsed_data.get('Category'),
+        'Packaging': parsed_data.get('Packaging'),
+        'Condition': parsed_data.get('Condition'),
+        'Functional': parsed_data.get('Functional'),
+        'Missing Parts': parsed_data.get(MISSING_PARTS),
+        'Missing Parts Description': parsed_data.get(MISSING_PARTS_DESCRIPTION),
+        'Damaged': parsed_data.get('Damaged'),
+        'Damage Description': parsed_data.get(DAMAGE_DESCRIPTION),
+        'Notes': parsed_data.get('Notes'),
+        'UPC': parsed_data.get('UPC'),
+        'ASIN': parsed_data.get('ASIN'),
+        'Retailer Item URL': parsed_data.get('URL'),
+    }
+
+def handle_database_insert(
+    conn,
+    auction_id: int,
+    lot_number: str,
+    current_bid: float,
+    parsed_data: dict,
+) -> None:
+    """Insert item directly into the flat table."""
+    # We no longer need to look up products or create product IDs.
+    # We just pass the data straight to the insert function.
+
+    insert_auction_item(conn, auction_id, lot_number, current_bid, parsed_data)
 
 def process_items(conn, auction_id: int, items: list) -> None:
     for item in items:
         lot_number = item['lotNumber']
         current_bid = get_current_bid(item)
-        parsed = parse_description(item.get('description', ''))
-        
-        cat_list = item.get('category', [])
-        if cat_list and isinstance(cat_list, list) and len(cat_list) > 0:
-            parsed['Category'] = cat_list[0].get('categoryName', 'Uncategorized')
+        parsed = parse_description(item['description'])
+
+# EXTRACT CATEGORY
+
+        cat_obj = item.get('primaryCategory')
+        if cat_obj and 'name' in cat_obj:
+            parsed['Category'] = cat_obj['name']
         else:
-            cat_obj = item.get('primaryCategory')
-            parsed['Category'] = cat_obj['name'] if cat_obj else "Uncategorized"
+            parsed['Category'] = "Uncategorized"
 
         insert_auction_item(conn, auction_id, lot_number, current_bid, parsed)
 
-def create_request_payload(auction_id: int, page_number: int) -> dict:
+def create_request_payload(auction_id: int) -> dict:
+    """Build the GraphQL payload."""
     return {
         "operationName": "LotSearch",
         "query": query,
         "variables": {
-            "auctionId": auction_id, 
-            "pageNumber": page_number, 
-            "pageLength": 100,
+            "auctionId": auction_id,
+            "pageNumber": 1,
+            "pageLength": 9000,
             "category": None,
             "searchText": None,
-            "zip": "", 
+            "zip": "",
             "miles": 50,
             "shippingOffered": False,
             "countryName": "",
             "status": "ALL",
-            "sortOrder": "LOT_NUMBER", 
+            "sortOrder": "LOT_NUMBER",
             "filter": "ALL",
             "isArchive": False,
             "dateStart": None,
             "dateEnd": None,
-            "countAsView": True, 
+            "countAsView": True,
             "hideGoogle": False,
         },
     }
 
-# FIXED: Correct Type Hint (Optional[Dict])
-def _fetch_page(auction_id: int, page: int, headers: dict) -> Optional[Dict[str, Any]]:
-    print(f"Fetching page {page}...")
-    try:
-        response = requests.post(graphql_url, headers=headers, json=create_request_payload(auction_id, page), cookies=cookies, timeout=60)
-        if response.status_code == 200:
-            return response.json()
-        print(f"Failed: {response.status_code}")
-        return None
-    except Exception as e:
-        print(f"Network error: {e}")
-        return None
+# ----------------------------------------------------------------------
 
-def _process_page_results(conn, auction_id: int, data: dict) -> int:
-    if 'data' not in data or 'lotSearch' not in data['data']:
-        print("Error: Invalid JSON response")
-        return -1
+# MAIN SCRAPER
 
-    items = data['data']['lotSearch']['pagedResults']['results']
-    if not items:
-        print("No more items found.")
-        return 0
-    
-    process_items(conn, auction_id, items)
-    return len(items)
-
-def _setup_database(auction_id: int, auction_url: str):
-    conn = create_connection()
-    if not conn: return None
-    ensure_schema(conn)
-    insert_auction(conn, auction_id, auction_url)
-    return conn
-
-# FIXED: Helper function to handle Metadata logic (Reduces complexity)
-def _try_capture_metadata(conn, auction_id: int, items: list) -> bool:
-    try:
-        if items:
-            first = items[0]
-            auc_info = first.get('auction', {})
-            title = auc_info.get('eventName', 'Unknown Title')
-            auctioneer = auc_info.get('auctioneer', {}).get('name', 'Unknown')
-            end_date = auc_info.get('eventDateEnd', '').split('T')[0]
-            print(f"📌 Info: {title} | {auctioneer} | Ends: {end_date}")
-            update_auction_metadata(conn, auction_id, title, auctioneer, end_date)
-            return True
-    except Exception as e:
-        print(f"Metadata Warning: {e}")
-    return False
-
-def _scrape_loop(conn, auction_id: int, headers: dict) -> int:
-    page = 1
-    total_saved = 0
-    metadata_saved = False
-    
-    while True:
-        data = _fetch_page(auction_id, page, headers)
-        if not data: break
-            
-        items = data.get('data', {}).get('lotSearch', {}).get('pagedResults', {}).get('results', [])
-        if not items: break
-        
-        # Capture Metadata once
-        if not metadata_saved:
-            metadata_saved = _try_capture_metadata(conn, auction_id, items)
-
-        count = _process_page_results(conn, auction_id, data)
-        if count <= 0: break
-            
-        total_saved += count
-        print(f"  Processed {count} items. (Total: {total_saved})")
-        
-        if count < 100: break
-        page += 1
-        time.sleep(0.5)
-        
-    return total_saved
+# ----------------------------------------------------------------------
 
 def scrape_auction(auction_url: str) -> None:
-    try: auction_id = extract_auction_id(auction_url)
-    except ValueError as e: print(f"Error: {e}"); return
+    # ---- 1. Extract ID -------------------------------------------------
+    try:
+        auction_id = extract_auction_id(auction_url)
+        print(f"Extracted Auction ID: {auction_id}")
+    except ValueError as e:
+        print(f"Error: {e}")
+        return
 
-    conn = _setup_database(auction_id, auction_url)
-    if not conn: return
+    # ---- 2. DB setup ---------------------------------------------------
+    conn = create_connection()
+    if not conn:
+        print("Error: Could not connect to database")
+        return
+    ensure_schema(conn)
+    insert_auction(conn, auction_id, auction_url)
 
+    # ---- 3. Request ----------------------------------------------------
     headers = headers_template.copy()
     headers['referer'] = auction_url
-    
-    print(f"Scraping auction: {auction_url}")
-    total = _scrape_loop(conn, auction_id, headers)
+    headers.pop('content-length', None)
 
-    conn.close()
-    print(f"Done! Total items saved: {total}")
+    payload = create_request_payload(auction_id)
+    print(f"Scraping auction: {auction_url}")
+    response = requests.post(graphql_url, headers=headers, json=payload, cookies=cookies)
+
+    # ---- 4. Process response -------------------------------------------
+    if response.status_code == 200:
+        print("Success! Processing items...")
+        data = response.json()
+
+        # Ensure output folder exists
+        os.makedirs("output", exist_ok=True)
+
+        with open(f"output/graphql_response_{auction_id}.json", "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
+
+        items = data['data']['lotSearch']['pagedResults']['results']
+        print(f"Found {len(items)} items.")
+
+        csv_rows = process_items(conn, auction_id, items)
+
+        df = pd.DataFrame(csv_rows)
+        try:
+            df.to_csv(f'output/auction_{auction_id}_data.csv', index=False)
+            print(f"Saved CSV and DB entries for auction {auction_id}.")
+        except PermissionError:
+            print("Warning: Could not save CSV file (file may be open in Excel). Data saved to database only.")
+            print(f"Close the file 'output/auction_{auction_id}_data.csv' and run again to save CSV.")
+    else:
+        print(f"Failed: {response.status_code}")
+        os.makedirs("output", exist_ok=True)
+        with open(f"output/graphql_error_{auction_id}.html", "wb") as f:
+            f.write(response.content)
+
+    if conn:
+        conn.close()
+
+# ----------------------------------------------------------------------
+
+# CLI ENTRYPOINT
+
+# ----------------------------------------------------------------------
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("url", type=str)
+    parser = argparse.ArgumentParser(
+        description="Scrape a HiBid auction using only the URL"
+    )
+    parser.add_argument(
+        "url",
+        type=str,
+        help="HiBid auction URL, e.g. <https://hibid.com/catalog/626395/>..."
+    )
     args = parser.parse_args()
     scrape_auction(args.url)
