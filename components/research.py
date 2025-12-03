@@ -1,59 +1,50 @@
 # components/research.py
 import streamlit as st
 import pandas as pd
+from typing import Any # <--- New Import for Type Hinting
 from utils.inventory import get_product_by_id, save_product_to_library
 from components.research_ui import render_product_form_fields
+
+# FIXED: Changed type_cast type hint to 'Any' to allow both str and float
+def _find_best_value(item: dict, keys: list, type_cast: Any = str):
+    """Helper to find the first non-empty value from a list of keys."""
+    for k in keys:
+        val = item.get(k)
+        if val:
+            try:
+                return type_cast(val)
+            except (ValueError, TypeError):
+                continue
+    return 0.0 if type_cast == float else ""
 
 def _get_initial_data(conn, first_item):
     """Loads existing product data or creates a template from the auction item."""
     existing_product_id = first_item.get('product_id')
-    product_data = {}
-    is_linked = False
-
+    
     if existing_product_id and existing_product_id > 0:
         loaded_prod = get_product_by_id(conn, existing_product_id)
         if loaded_prod is not None:
-            product_data = loaded_prod.to_dict()
-            is_linked = True
-    else:
-        # Template from raw auction data (FROM GRID ROW)
-        # FIXED: Use the Display Names from Viewer Grid
-        
-        # 1. Scraped MSRP (Check both display names just in case)
-        msrp_guess = 0.0
-        for key in ['Scraped MSRP', 'suggested_msrp', 'SuggestedMSRP', 'MSRP']:
-            val = first_item.get(key)
-            if val:
-                try: 
-                    msrp_guess = float(val)
-                    break
-                except: pass
+            return loaded_prod.to_dict(), existing_product_id, True
 
-        # Try to find Category
-        cat_guess = ''
-        for key in ['Category', 'scraped_category', 'primaryCategory']:
-            val = first_item.get(key)
-            if val:
-                cat_guess = str(val)
-                break
+    # Template from raw auction data
+    # Now this works without Pylance errors because we allow 'float'
+    msrp_guess = _find_best_value(first_item, ['Scraped MSRP', 'suggested_msrp', 'SuggestedMSRP', 'MSRP'], float)
+    cat_guess = _find_best_value(first_item, ['Category', 'scraped_category', 'primaryCategory'], str)
 
-        product_data = {
-            'title': first_item.get('Title'), 
-            'brand': first_item.get('Brand'),
-            'model': first_item.get('Model'), 
-            'upc': first_item.get('UPC'),
-            'asin': first_item.get('ASIN'), 
-            'notes': first_item.get('Notes'),
-            
-            # FIXED: Pre-fill these fields
-            'msrp': msrp_guess,
-            'category': cat_guess
-        }
+    product_data = {
+        'title': first_item.get('Title'), 
+        'brand': first_item.get('Brand'),
+        'model': first_item.get('Model'), 
+        'upc': first_item.get('UPC'),
+        'asin': first_item.get('ASIN'), 
+        'notes': first_item.get('Notes'),
+        'msrp': msrp_guess,
+        'category': cat_guess
+    }
     
-    return product_data, existing_product_id, is_linked
+    return product_data, existing_product_id, False
 
 def _handle_save(conn, form_values, existing_id, is_linked, selected_ids):
-    """Handles the database save operation."""
     target_prod_id = existing_id if is_linked else None
     form_values['id'] = target_prod_id
     
