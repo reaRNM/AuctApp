@@ -69,9 +69,19 @@ try:
                     form_values = render_product_form_fields(full_data)
                     form_values['id'] = prod_id
                     
-                    st.markdown("###")
+                    # NEW: Favorite Toggle
+                    st.markdown("---")
+                    is_fav = st.checkbox("❤️ Mark as Favorite / Watch List", value=bool(full_data.get('is_favorite')))
+                    
                     if st.form_submit_button("💾 Save Changes", use_container_width=True):
+                        # Save normal fields
                         save_product_to_library(conn, form_values)
+                        
+                        # Save Favorite status manually
+                        cursor = conn.cursor()
+                        cursor.execute("UPDATE products SET is_favorite = ? WHERE id = ?", (1 if is_fav else 0, prod_id))
+                        conn.commit()
+                        
                         st.success("Saved!")
                         st.rerun()
                 

@@ -5,7 +5,7 @@ OPT_PACKAGING = ["Yes", "No", "Unknown", "Not in Original", "Damaged"]
 OPT_CONDITION = ["Excellent", "New (Other)", "Used", "For Parts Only", "Bad", "Ok", "Unknown"]
 OPT_FUNCTIONAL = ["Yes", "No", "Unknown", "Unable to Test"]
 OPT_YES_NO = ["Yes", "No", "Unknown"]
-
+OPT_RISK = ["High Risk", "Medium Risk", "No Bids", ""]
 # (OPT_CATEGORIES removed since we are using scraped data now)
 
 def configure_column_editors(gb):
@@ -33,6 +33,13 @@ def configure_column_editors(gb):
         cellEditorParams={"values": OPT_FUNCTIONAL}
     )
 
+    # Risk
+    gb.configure_column("Risk",
+        editable=True,
+        cellEditor="agSelectCellEdiotr",
+        cellEditorParams={"values": OPT_RISK}
+    )
+    
     # Binary Flags
     for col in ["Damaged", "Missing Parts"]:
         gb.configure_column(col, 
@@ -40,6 +47,7 @@ def configure_column_editors(gb):
             cellEditor="agSelectCellEditor", 
             cellEditorParams={"values": OPT_YES_NO}
         )
+        
 
     # FIXED: Removed "Category" from this list so it is NOT editable
     text_fields = [

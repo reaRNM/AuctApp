@@ -1,7 +1,7 @@
 # components/research.py
 import streamlit as st
 import pandas as pd
-from typing import Any # <--- New Import for Type Hinting
+from typing import Any
 from utils.inventory import get_product_by_id, save_product_to_library
 from components.research_ui import render_product_form_fields
 
@@ -68,30 +68,39 @@ def render_research_station(conn, selected_rows):
     
     product_data, existing_id, is_linked = _get_initial_data(conn, selected_rows[0])
 
+    # --- UI HEADER ---
     st.markdown("---")
     if is_bulk:
-        st.subheader(f"📚 Bulk Linker ({count} Items)")
-        st.info(f"Updating Master Product and linking {count} items.")
+        st.subheader(f"📚 Bulk Editor ({count} Items)")
     else:
         st.subheader("📚 Product Research Station")
-        if is_linked:
-            st.success(f"✅ Linked to Master Product #{existing_id}")
-        else:
-            st.warning("🚫 Not in Product Library. Edit details below to add.")
 
-    with st.form("research_form"):
-        form_values = render_product_form_fields(product_data)
-        
-        st.markdown("###")
-        
-        if is_bulk:
-            btn_label = f"🔗 Create Master & Link {count} Items"
-        elif is_linked:
-            btn_label = "💾 Update Master Record"
-        else:
-            btn_label = "➕ Create & Link to Library"
+    # --- TABS: Manual vs AI ---
+    tab_manual, tab_ai = st.tabs(["📝 Manual Entry", "🤖 AI Import (Screenshot)"])
+
+    with tab_ai:
+        st.info("Upload screenshots of Amazon/Terapeak to auto-extract data (Coming Soon with AI API).")
+        uploaded_file = st.file_uploader("Choose a screenshot...", type=['png', 'jpg', 'jpeg'])
+        if uploaded_file is not None:
+            st.image(uploaded_file, caption="Analysis Target", width=300)
+            if st.button("✨ Extract Data (Simulated)"):
+                st.warning("AI features require an API Key. For now, please use Manual Entry.")
+                # Future: Call Gemini API here, parse JSON, and update `product_data`
+
+    with tab_manual:
+        with st.form("research_form"):
+            form_values = render_product_form_fields(product_data)
             
-        submitted = st.form_submit_button(btn_label, use_container_width=True)
+            st.markdown("###")
+            
+            if is_bulk:
+                btn_label = f"💾 Update {count} Items"
+            elif is_linked:
+                btn_label = "💾 Update Master Record"
+            else:
+                btn_label = "➕ Create & Link to Library"
+                
+            submitted = st.form_submit_button(btn_label, use_container_width=True)
 
-        if submitted:
-            _handle_save(conn, form_values, existing_id, is_linked, selected_ids)
+            if submitted:
+                _handle_save(conn, form_values, existing_id, is_linked, selected_ids)

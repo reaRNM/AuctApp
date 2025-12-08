@@ -317,9 +317,11 @@ PRICE_PATTERN = re.compile(r'^\s*\$(\d+(?:,\d+)*(?:\.\d+)?)\s+(.*)')
 
 # === HELPER FUNCTIONS ===
 def extract_auction_id(url: str) -> int:
+    """Extract numeric auction ID from a HiBid URL."""
     pattern = r'/catalog/(\d+)|/lots/(\d+)'
     m = re.search(pattern, url)
-    if not m: raise ValueError("Could not extract auction ID from URL")
+    if not m:
+        raise ValueError("Could not extract auction ID from URL. Check format.")
     return int(m.group(1) or m.group(2))
 
 def get_current_bid(item: dict) -> float:
@@ -369,6 +371,20 @@ def process_items(conn, auction_id: int, items: list) -> None:
         lot_number = item['lotNumber']
         current_bid = get_current_bid(item)
         parsed = parse_description(item.get('description', ''))
+
+        # Fallback: if description doesn't contain a Retailer URL, use HiBid's productUrl/links
+        if not parsed.get("URL"):
+            lot_state = item.get("lotState", {}) or {}
+            hibid_url = lot_state.get("productUrl")
+            if not hibid_url:
+                links = item.get("links") or []
+                # Prefer the first link with a URL
+                for link in links:
+                    if link.get("url"):
+                        hibid_url = link["url"]
+                        break
+            if hibid_url:
+                parsed["URL"] = hibid_url
         
         cat_list = item.get('category', [])
         if cat_list and isinstance(cat_list, list) and len(cat_list) > 0:

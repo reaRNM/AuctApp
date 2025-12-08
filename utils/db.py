@@ -22,7 +22,7 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             )
         """)
 
-        # 2. PRODUCTS
+        # 2. PRODUCTS (Update to include is_favorite)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS products (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -37,7 +37,9 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
                 ebay_sold_low REAL, ebay_sold_high REAL, ebay_sell_through REAL,
                 amazon_url TEXT, amazon_new_price REAL, amazon_used_price REAL,
                 amazon_sales_rank INTEGER,
-                notes TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                notes TEXT, 
+                is_favorite BOOLEAN DEFAULT 0, -- NEW FIELD
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
         """)
 
@@ -103,6 +105,13 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
                 try: cursor.execute(f"ALTER TABLE products ADD COLUMN {col} {dtype}")
                 except sqlite3.OperationalError: pass
 
+        # NEW: Product Favorite Migration
+        prod_cols = [row[1] for row in cursor.execute("PRAGMA table_info(products)")]
+        if 'is_favorite' not in prod_cols:
+            try: cursor.execute("ALTER TABLE products ADD COLUMN is_favorite BOOLEAN DEFAULT 0")
+            except sqlite3.OperationalError: pass
+            
+            
 # --- WRITES ---
 def insert_auction(conn, auction_id, url):
     conn.execute("INSERT OR IGNORE INTO auctions (id, url) VALUES (?, ?)", (auction_id, url))

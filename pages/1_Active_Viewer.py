@@ -10,7 +10,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.db import create_connection, get_active_auctions, get_auction_items, update_item_field, update_item_status
 from utils.parse import classify_risk
 from utils.inventory import auto_link_products
-from components.grid import render_grid, COLUMN_BID, COLUMN_BID_PER, COLUMN_EST_PROFIT
+from components.grid import render_grid, COLUMN_BID, COLUMN_BID_PER, COLUMN_EST_PROFIT, COLUMN_MSRP
 from components.research import render_research_station
 
 # === CONSTANTS ===
@@ -34,7 +34,7 @@ COL_NOTES = "Notes"
 COL_UPC = "UPC"
 COL_ASIN = "ASIN"
 COL_URL = "URL"
-COL_ACTIONS = "Actions"
+COL_SCRAPED_MSRP = "MSRP"
 
 DB_COL_MAP = {
     COL_TITLE: 'title', COL_BRAND: 'brand', COL_MODEL: 'model',
@@ -98,6 +98,13 @@ try:
 
     df = get_auction_items(conn, auction_id)
     if df.empty: st.warning("No items found."); st.stop()
+    
+    # --- NEW: CHECK FAVORITES ---
+    # Fetch list of favorite product IDs
+    fav_query = "SELECT id FROM products WHERE is_favorite = 1"
+    fav_ids = pd.read_sql_query(fav_query, conn)['id'].tolist()
+
+
 
     # Calculations
     df[COL_RISK] = df.apply(classify_risk, axis=1)
@@ -110,6 +117,17 @@ try:
 
     df["working_msrp"] = df["master_msrp"]
     df.loc[df["working_msrp"] == 0, "working_msrp"] = df["suggested_msrp"]
+    
+    df[COL_SCRAPED_MSRP] = df["working_msrp"] 
+
+    # --- NEW: FAVORITE LOGIC ---
+    def flag_favorites(row):
+        title = row['title']
+        if row['product_id'] in fav_ids:
+            return f"❤️ {title}" # Add Heart to title
+        return title
+    
+    df[COL_TITLE] = df.apply(flag_favorites, axis=1)
 
     def determine_msrp_status(row):
         if row["product_id"] and row["master_msrp"] > 0: return "✅ Linked"
@@ -135,28 +153,36 @@ try:
         "missing_parts": COL_MISSING, "missing_parts_desc": COL_MISSING_DESC,
         "damaged": COL_DAMAGED, "damage_desc": COL_DAMAGE_DESC,
         "item_notes": COL_NOTES, "upc": COL_UPC, "asin": COL_ASIN, "url": COL_URL,
-        "suggested_msrp": "Scraped MSRP"
+        "suggested_msrp": COL_SCRAPED_MSRP
     }
     df = df.rename(columns=rename_map)
 
-    # Provide link target for per-row actions
-    if COL_URL in df.columns:
-        df["Actions"] = df[COL_URL]
 
     # Filters
+    from components.filters import render_filters, apply_filters
+    
+    # st.sidebar.divider() # Remove old sidebar filter code if it exists there, 
+    # instead render them at the top or in an expander. 
+    # For now, let's keep the sidebar clean and put filters in an expander above the grid:
+    
+    with st.expander("🔎 Filters", expanded=True):
+        active_filters = render_filters(df)
+    
+    df_display = apply_filters(df, active_filters)
+    
     if not show_hidden: df = df[df["is_hidden"] == 0]
     if hide_high: df = df[df[COL_RISK] != "HIGH RISK"]
     if hide_med: df = df[df[COL_RISK] != "MEDIUM RISK"]
     if show_no_bids: df = df[df[COL_RISK] == "NO BIDS"]
 
     desired_cols = [
-        COL_SELECT, COL_RISK, COL_WATCH, COL_ACTIONS, COL_LOT, COLUMN_EST_PROFIT, COLUMN_BID, COLUMN_BID_PER,
-        COL_TITLE, COL_BRAND, COL_MODEL, COL_CATEGORY, 
+        COL_SELECT, COL_RISK, COL_WATCH, COL_LOT, COLUMN_BID,
+        COL_TITLE, COL_BRAND, COL_MODEL, COL_CATEGORY, COL_SCRAPED_MSRP, COLUMN_EST_PROFIT, COLUMN_BID_PER,
         COL_PACKAGING, COL_CONDITION, COL_FUNCTIONAL, 
         COL_MISSING, COL_MISSING_DESC, COL_DAMAGED, COL_DAMAGE_DESC, 
         COL_NOTES, COL_UPC, COL_ASIN, COL_URL, 
         "id", "is_hidden", "current_bid", "product_id", 
-        "master_msrp", "master_target_price", "profit_val", "Scraped MSRP"
+        "master_msrp", "master_target_price", "profit_val",
     ]
     final_cols = [c for c in desired_cols if c in df.columns]
     df_display = df[final_cols].copy()
@@ -166,34 +192,7 @@ try:
     selected_rows = grid_result["selected_rows"]
     updated_data = grid_result["data"]
 
-    # --- ACTIONS ---
-    st.sidebar.divider()
-    if len(selected_rows) > 1:
-        st.sidebar.subheader(f"✏️ Bulk Edit ({len(selected_rows)})")
-        with st.sidebar.form("bulk_edit"):
-            b_title = st.text_input("Title")
-            b_brand = st.text_input("Brand")
-            b_model = st.text_input("Model")
-            b_cat = st.text_input("Category")
-            c1, c2 = st.columns(2)
-            with c1: b_upc = st.text_input("UPC")
-            with c2: b_asin = st.text_input("ASIN")
-            if st.form_submit_button("Apply to Selected", use_container_width=True):
-                progress = st.sidebar.progress(0)
-                for i, row in enumerate(selected_rows):
-                    item_id = row.get("id")
-                    if not item_id: continue
-                    if b_title: update_item_field(conn, item_id, "title", b_title)
-                    if b_brand: update_item_field(conn, item_id, "brand", b_brand)
-                    if b_model: update_item_field(conn, item_id, "model", b_model)
-                    if b_cat: update_item_field(conn, item_id, "scraped_category", b_cat)
-                    if b_upc: update_item_field(conn, item_id, "upc", b_upc)
-                    if b_asin: update_item_field(conn, item_id, "asin", b_asin)
-                    progress.progress((i + 1) / len(selected_rows))
-                st.sidebar.success("Bulk update complete!")
-                force_refresh()
-                st.rerun()
-        st.sidebar.divider()
+
 
     if st.sidebar.button("❌ Cross Out Selected"):
         if not selected_rows: st.sidebar.warning("No items selected.")
