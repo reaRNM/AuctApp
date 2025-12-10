@@ -5,8 +5,7 @@ OPT_PACKAGING = ["Yes", "No", "Unknown", "Not in Original", "Damaged"]
 OPT_CONDITION = ["Excellent", "New (Other)", "Used", "For Parts Only", "Bad", "Ok", "Unknown"]
 OPT_FUNCTIONAL = ["Yes", "No", "Unknown", "Unable to Test"]
 OPT_YES_NO = ["Yes", "No", "Unknown"]
-OPT_RISK = ["High Risk", "Medium Risk", "No Bids", ""]
-# (OPT_CATEGORIES removed since we are using scraped data now)
+OPT_RISK = ["HIGH RISK", "MEDIUM RISK", "NO BIDS", ""] # Include empty string for clearing
 
 def configure_column_editors(gb):
     """
@@ -33,10 +32,10 @@ def configure_column_editors(gb):
         cellEditorParams={"values": OPT_FUNCTIONAL}
     )
 
-    # Risk
+    # UPDATED: Risk Dropdown - Check column name matches exactly what is in DataFrame
     gb.configure_column("Risk",
         editable=True,
-        cellEditor="agSelectCellEdiotr",
+        cellEditor="agSelectCellEditor",
         cellEditorParams={"values": OPT_RISK}
     )
     
@@ -49,7 +48,6 @@ def configure_column_editors(gb):
         )
         
 
-    # FIXED: Removed "Category" from this list so it is NOT editable
     text_fields = [
         "Title", "Brand", "Model", "UPC", "ASIN", 
         "Notes", "Missing Parts Desc", "Damaged Desc"

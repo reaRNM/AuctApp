@@ -12,7 +12,6 @@ def get_bid_values(df: pd.DataFrame) -> pd.Series:
         return pd.to_numeric(df["current_bid"], errors="coerce").fillna(0.0)
     
     if "Bid" in df.columns:
-        # Remove '$' and ',' then convert to float
         return (
             df["Bid"]
             .astype(str)
@@ -20,12 +19,8 @@ def get_bid_values(df: pd.DataFrame) -> pd.Series:
             .apply(pd.to_numeric, errors="coerce")
             .fillna(0.0)
         )
-
-    
-    # Fallback if neither exists
     return pd.Series([0.0] * len(df))
-        
-        
+
 # === RENDER FILTERS ===
 def render_filters(df: pd.DataFrame) -> dict:
     """Render Streamlit filters and return dictionary of selected values."""
@@ -50,7 +45,10 @@ def render_filters(df: pd.DataFrame) -> dict:
     cats = sorted(df[cat_col].dropna().unique().tolist()) if cat_col in df.columns else []
     with col4: selected_cats = st.multiselect("Category", cats, default=[])
 
-    with col5: show_no_bids = st.checkbox("Show Only No Bids", value=False)
+    # NEW: Added Watch List checkbox here
+    with col5: 
+        show_no_bids = st.checkbox("Show Only No Bids", value=False)
+        show_watchlist = st.checkbox("⭐ Show Watch List", value=False)
     
     with col6:
         hide_high = st.checkbox("Hide High Risk", value=False)
@@ -62,6 +60,7 @@ def render_filters(df: pd.DataFrame) -> dict:
         "selected_brands": selected_brands,
         "selected_cats": selected_cats,
         "show_no_bids_only": show_no_bids,
+        "show_watchlist": show_watchlist, # NEW
         "hide_high_risk": hide_high,
         "hide_medium_risk": hide_med,
         "brand_col_name": brand_col,
@@ -100,6 +99,17 @@ def _filter_by_category(df: pd.DataFrame, filters: dict) -> pd.DataFrame:
         return df[df[cat_col].isin(cats)]
     return df
 
+# NEW: Filter by Watch column
+def _filter_by_watch(df: pd.DataFrame, filters: dict) -> pd.DataFrame:
+    if filters.get("show_watchlist"):
+        # "Watch" is the boolean column created in Active Viewer
+        if "Watch" in df.columns:
+            return df[df["Watch"] == True]
+        # Fallback to DB column if "Watch" display column missing
+        elif "is_watched" in df.columns:
+             return df[df["is_watched"] == 1]
+    return df
+
 def _filter_by_risk(df: pd.DataFrame, filters: dict) -> pd.DataFrame:
     if "Risk" not in df.columns:
         return df
@@ -123,5 +133,6 @@ def apply_filters(df: pd.DataFrame, filters: dict) -> pd.DataFrame:
     filtered = _filter_by_brand(filtered, filters)
     filtered = _filter_by_category(filtered, filters)
     filtered = _filter_by_risk(filtered, filters)
+    filtered = _filter_by_watch(filtered, filters) # NEW
 
     return filtered
