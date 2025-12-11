@@ -10,19 +10,19 @@ def create_connection(db_path: str = "auctions.db") -> sqlite3.Connection:
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
     with conn:
-        # 1. AUCTIONS (Updated with Title)
+        # 1. AUCTIONS
         conn.execute("""
             CREATE TABLE IF NOT EXISTS auctions (
                 id INTEGER PRIMARY KEY,
                 url TEXT UNIQUE,
                 scrape_date TEXT DEFAULT CURRENT_TIMESTAMP,
                 auctioneer TEXT,
-                auction_title TEXT, -- NEW
+                auction_title TEXT,
                 end_date TEXT
             )
         """)
 
-        # 2. PRODUCTS (Update to include is_favorite)
+        # 2. PRODUCTS (Expanded Schema)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS products (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -33,12 +33,37 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
                 weight_lbs REAL, weight_oz REAL,
                 length REAL, width REAL, height REAL,
                 is_irregular BOOLEAN DEFAULT 0, ship_method TEXT,
-                ebay_url TEXT, ebay_active_low REAL, ebay_active_high REAL,
-                ebay_sold_low REAL, ebay_sold_high REAL, ebay_sell_through REAL,
-                amazon_url TEXT, amazon_new_price REAL, amazon_used_price REAL,
+                
+                -- eBay Data (Sold)
+                ebay_avg_sold_price REAL,
+                ebay_sold_range_low REAL,
+                ebay_sold_range_high REAL,
+                ebay_avg_shipping_sold REAL,
+                ebay_sell_through_rate REAL,
+                ebay_total_sold_count INTEGER,
+                
+                -- eBay Data (Active)
+                ebay_active_count INTEGER,
+                ebay_avg_list_price REAL,
+                ebay_active_low REAL,          -- NEW
+                ebay_active_high REAL,         -- NEW
+                ebay_avg_shipping_active REAL, -- NEW
+                
+                -- Amazon Data
+                amazon_url TEXT, 
+                amazon_new_price REAL, 
+                amazon_used_price REAL,
                 amazon_sales_rank INTEGER,
+                amazon_reviews INTEGER,     
+                amazon_stars REAL,          
+                amazon_rank_main INTEGER,   
+                amazon_cat_name TEXT,       -- NEW
+                amazon_rank_sub INTEGER,    
+                amazon_subcat_name TEXT,    -- NEW
+                
+                market_notes TEXT,
                 notes TEXT, 
-                is_favorite BOOLEAN DEFAULT 0, -- NEW FIELD
+                is_favorite BOOLEAN DEFAULT 0,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -66,7 +91,24 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         # --- MIGRATIONS ---
         cursor = conn.cursor()
         
-        # Add auction_title if missing
+        # Add new Product columns if missing
+        prod_cols = [row[1] for row in cursor.execute("PRAGMA table_info(products)")]
+        new_cols = {
+            'ebay_avg_sold_price': 'REAL', 'ebay_sold_range_low': 'REAL', 'ebay_sold_range_high': 'REAL',
+            'ebay_avg_shipping_sold': 'REAL', 'ebay_sell_through_rate': 'REAL', 'ebay_total_sold_count': 'INTEGER',
+            'ebay_active_count': 'INTEGER', 'ebay_avg_list_price': 'REAL', 'market_notes': 'TEXT',
+            'amazon_reviews': 'INTEGER', 'amazon_stars': 'REAL', 'amazon_rank_main': 'INTEGER', 'amazon_rank_sub': 'INTEGER',
+            'is_favorite': 'BOOLEAN DEFAULT 0',
+            # LATEST ADDITIONS:
+            'amazon_cat_name': 'TEXT', 'amazon_subcat_name': 'TEXT',
+            'ebay_active_low': 'REAL', 'ebay_active_high': 'REAL', 'ebay_avg_shipping_active': 'REAL'
+        }
+        for col, dtype in new_cols.items():
+            if col not in prod_cols:
+                try: cursor.execute(f"ALTER TABLE products ADD COLUMN {col} {dtype}")
+                except sqlite3.OperationalError: pass
+
+        # Auction Metadata Migrations
         auc_cols = [row[1] for row in cursor.execute("PRAGMA table_info(auctions)")]
         if 'auction_title' not in auc_cols:
             try: cursor.execute("ALTER TABLE auctions ADD COLUMN auction_title TEXT")
@@ -78,46 +120,11 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             try: cursor.execute("ALTER TABLE auctions ADD COLUMN end_date TEXT")
             except sqlite3.OperationalError: pass
 
-        # Item Migrations
-        item_cols = [row[1] for row in cursor.execute("PRAGMA table_info(auction_items)")]
-        for col, dtype in {'sold_price': 'REAL', 'status': 'TEXT', 'suggested_msrp': 'REAL', 'scraped_category': 'TEXT'}.items():
-            if col not in item_cols:
-                try: cursor.execute(f"ALTER TABLE auction_items ADD COLUMN {col} {dtype}")
-                except sqlite3.OperationalError: pass
-
-        # Product Migrations
-        prod_cols = [row[1] for row in cursor.execute("PRAGMA table_info(products)")]
-        new_prod_cols = {
-            'ebay_url': 'TEXT', 'ebay_active_low': 'REAL', 'ebay_active_high': 'REAL',
-            'ebay_sold_low': 'REAL', 'ebay_sold_high': 'REAL', 'ebay_sell_through': 'REAL',
-            'amazon_url': 'TEXT', 'amazon_new_price': 'REAL', 'amazon_used_price': 'REAL',
-            'amazon_sales_rank': 'INTEGER',
-            'ebay_sold_30d': 'INTEGER', 'ebay_sold_60d': 'INTEGER', 'ebay_sold_90d': 'INTEGER',
-            'ebay_num_sellers': 'INTEGER', 'ebay_avg_sold': 'REAL', 'ebay_low_sold': 'REAL', 'ebay_high_sold': 'REAL',
-            'ebay_avg_ship_sold': 'REAL', 'ebay_free_ship_pct_sold': 'REAL', 'ebay_ctr': 'REAL',
-            'ebay_active_count': 'INTEGER', 'ebay_avg_list': 'REAL', 'ebay_low_list': 'REAL', 'ebay_high_list': 'REAL',
-            'ebay_avg_ship_list': 'REAL', 'ebay_free_ship_pct_list': 'REAL', 'ebay_promoted_pct': 'REAL',
-            'amazon_price': 'REAL', 'amazon_stars': 'REAL', 'amazon_cat_rank': 'TEXT', 'amazon_subcat_rank': 'TEXT',
-            'amazon_sold_30d': 'INTEGER', 'amazon_freq_returned': 'BOOLEAN DEFAULT 0'
-        }
-        for col, dtype in new_prod_cols.items():
-            if col not in prod_cols:
-                try: cursor.execute(f"ALTER TABLE products ADD COLUMN {col} {dtype}")
-                except sqlite3.OperationalError: pass
-
-        # NEW: Product Favorite Migration
-        prod_cols = [row[1] for row in cursor.execute("PRAGMA table_info(products)")]
-        if 'is_favorite' not in prod_cols:
-            try: cursor.execute("ALTER TABLE products ADD COLUMN is_favorite BOOLEAN DEFAULT 0")
-            except sqlite3.OperationalError: pass
-            
-            
 # --- WRITES ---
 def insert_auction(conn, auction_id, url):
     conn.execute("INSERT OR IGNORE INTO auctions (id, url) VALUES (?, ?)", (auction_id, url))
     conn.commit()
 
-# NEW: Added title to update function
 def update_auction_metadata(conn, auction_id, title, auctioneer, end_date):
     conn.execute("""
         UPDATE auctions 
@@ -166,7 +173,7 @@ def update_final_price(conn, auction_id: int, lot_number: str, sold_price: float
     """, (sold_price, status, auction_id, lot_number))
     conn.commit()
 
-# --- READS (Updated with Title) ---
+# --- READS ---
 def get_active_auctions(conn) -> pd.DataFrame:
     return pd.read_sql_query("""
         SELECT a.id, a.url, a.scrape_date, a.auction_title, a.auctioneer, a.end_date, COUNT(i.id) AS item_count
@@ -187,9 +194,6 @@ def get_closed_auctions(conn) -> pd.DataFrame:
         ORDER BY a.scrape_date DESC
     """, conn)
 
-def get_auctions(conn) -> pd.DataFrame:
-    return get_active_auctions(conn)
-
 def get_auction_items(conn, auction_id: int) -> pd.DataFrame:
     return pd.read_sql_query("""
         SELECT
@@ -208,6 +212,7 @@ def get_auction_items(conn, auction_id: int) -> pd.DataFrame:
             
             p.msrp as master_msrp,
             p.target_list_price as master_target_price,
+            p.shipping_cost_basis,
             
             i.packaging, i.condition, i.functional, 
             i.missing_parts, i.missing_parts_desc,

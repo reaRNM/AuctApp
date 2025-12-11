@@ -34,7 +34,6 @@ COL_DAMAGE_DESC = "Damaged Desc"
 COL_NOTES = "Notes"
 COL_UPC = "UPC"
 COL_ASIN = "ASIN"
-# COL_URL = "URL" # REMOVED from display
 COL_SCRAPED_MSRP = "MSRP"
 
 DB_COL_MAP = {
@@ -141,10 +140,25 @@ try:
         return "❌ Missing"
     df[COL_MSRP_STAT] = df.apply(determine_msrp_status, axis=1)
 
-    # Profit Logic
-    df["profit_val"] = df.apply(lambda x: (x['master_target_price'] - x['current_bid']) if x['master_target_price'] > 0 else 0, axis=1)
-    df[COLUMN_EST_PROFIT] = df["profit_val"].apply(lambda x: f"${x:,.2f}" if x != 0 else "-")
+ # ... (inside pages/1_Active_Viewer.py)
+
+    # Profit Logic: Target - Bid - Shipping - Fees (15%)
+    def calc_real_profit(row):
+        target = row['master_target_price']
+        if target <= 0: return 0
+        
+        bid = row['current_bid']
+        ship = row.get('shipping_cost_basis', 0) or 0 # Default to 0 if missing
+        fees = target * 0.15 # 15% Platform Fee
+        
+        return target - bid - ship - fees
+
+    df["profit_val"] = df.apply(calc_real_profit, axis=1)
     
+    # Display Format
+    df[COLUMN_EST_PROFIT] = df.apply(lambda x: f"${x['profit_val']:,.2f}" if x['master_target_price'] > 0 else "-", axis=1)
+
+    # ... (rest of the file remains the same)
     df[COLUMN_BID] = df["current_bid"].apply(lambda x: f"${x:,.2f}")
     df[COL_WATCH] = df["is_watched"].apply(lambda x: True if x == 1 else False)
     

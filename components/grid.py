@@ -111,9 +111,9 @@ def render_grid(df: pd.DataFrame, height: int = 650, allow_selection: bool = Tru
     if allow_selection:
         gb.configure_selection(
             selection_mode="multiple", 
-            use_checkbox=False, 
-            header_checkbox=False,
-            suppressRowClickSelection=True 
+            use_checkbox=False,
+            rowMultiSelectWithClick=True,
+            header_checkbox=False
         )
 
     grid_options = gb.build()
