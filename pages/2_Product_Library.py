@@ -3,18 +3,21 @@ import streamlit as st
 import pandas as pd
 import sys
 import os
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.db import create_connection
 from utils.inventory import save_product_to_library, get_product_by_id, delete_product
 from components.research_ui import render_product_form_fields 
-from utils.ai import extract_data_with_gemini, get_api_key # <--- Import
+from utils.ai import extract_data_with_gemini, get_api_key 
+from components.grid_styles import JS_CURRENCY_SORT, JS_MSRP_STYLE 
+# NEW: Import All Constants
+from utils.parse import COL_MSRP, COL_TITLE, COL_BRAND, COL_CAT, COL_AVG_SOLD
 
 st.set_page_config(page_title="Product Library", layout="wide")
 st.title("📚 Master Product Library")
 
-# Session state for Library AI
 if 'lib_ai_result' not in st.session_state:
     st.session_state.lib_ai_result = None
 
@@ -24,9 +27,9 @@ try:
     # 1. SEARCH
     search_term = st.text_input("🔍 Search Library (Title, Brand, UPC, ASIN)", "")
 
-    # 2. LOAD MASTER DATA
+    # 2. LOAD MASTER DATA (ADDED MSRP, AVG SOLD)
     query = """
-        SELECT id, title, brand, model, category, upc, asin, avg_sold_price 
+        SELECT id, title, brand, model, category, upc, asin, msrp, avg_sold_price, is_favorite 
         FROM products
         WHERE title LIKE ? OR brand LIKE ? OR model LIKE ? OR upc LIKE ? OR asin LIKE ?
         ORDER BY title ASC
@@ -34,25 +37,46 @@ try:
     params = tuple([f"%{search_term}%"] * 5)
     df = pd.read_sql_query(query, conn, params=params)
 
+    # RENAME DB COLUMNS TO CONSTANTS
+    df = df.rename(columns={
+        "title": COL_TITLE,
+        "brand": COL_BRAND,
+        "category": COL_CAT,
+        "msrp": COL_MSRP,
+        "avg_sold_price": COL_AVG_SOLD
+    })
+
     # 3. LIST
-    col_list, col_detail = st.columns([5, 5])
+    col_list, col_detail = st.columns([6, 4]) # Adjusted width
 
     with col_list:
         st.subheader(f"Products ({len(df)})")
-        from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
         
-        gb = GridOptionsBuilder.from_dataframe(df[['id', 'title', 'brand', 'model', 'category']])
+        # Grid Configuration
+        gb = GridOptionsBuilder.from_dataframe(df[['id', COL_TITLE, COL_BRAND, COL_CAT, COL_MSRP, COL_AVG_SOLD]])
         gb.configure_selection('single', use_checkbox=False)
         gb.configure_column("id", hide=True)
         gb.configure_grid_options(domLayout='autoHeight')
         
+        # USE CONSTANTS FOR CONFIGURATION
+        gb.configure_column(COL_MSRP, width=90, 
+                            type=["numericColumn", "numberColumnFilter"],
+                            valueFormatter="x > 0 ? '$' + x.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : ''",
+                            comparator=JS_CURRENCY_SORT, cellStyle=JS_MSRP_STYLE)
+                            
+        gb.configure_column(COL_AVG_SOLD, width=90, 
+                            type=["numericColumn", "numberColumnFilter"],
+                            valueFormatter="x > 0 ? '$' + x.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : ''",
+                            comparator=JS_CURRENCY_SORT)
+
         grid_response = AgGrid(
-            df[['id', 'title', 'brand', 'model', 'category']],
+            df[['id', COL_TITLE, COL_BRAND, COL_CAT, COL_MSRP, COL_AVG_SOLD]],
             gridOptions=gb.build(),
             update_mode=GridUpdateMode.SELECTION_CHANGED,
             fit_columns_on_grid_load=True,
             height=600,
-            theme="streamlit"
+            theme="streamlit",
+            allow_unsafe_jscode=True
         )
 
     # 4. DETAILS & ACTIONS
@@ -68,10 +92,17 @@ try:
                 
                 # MERGE AI DATA IF AVAILABLE
                 if st.session_state.lib_ai_result:
-                    clean_ai = {k: v for k, v in st.session_state.lib_ai_result.items() if v is not None and v != 0 and v != ""}
-                    full_data.update(clean_ai)
+                    ai_data = st.session_state.lib_ai_result
+                    if isinstance(ai_data, list):
+                        if len(ai_data) > 0 and isinstance(ai_data[0], dict):
+                            ai_data = ai_data[0] 
+                        else:
+                            ai_data = {}
+                    if isinstance(ai_data, dict):
+                        clean_ai = {k: v for k, v in ai_data.items() if v is not None and v != 0 and v != ""}
+                        full_data.update(clean_ai)
 
-                st.subheader(f"✏️ Edit: {full_data.get('title')}")
+                st.subheader(f"✏️ Edit: {full_data.get(COL_TITLE)}")
                 
                 # --- TABS FOR AI ---
                 tab_edit, tab_ai = st.tabs(["📝 Edit Product", "🤖 AI Import"])
@@ -111,7 +142,7 @@ try:
                             st.success("Saved!")
                             st.rerun()
                 
-                # ... (Keep existing Price History & Delete Logic)
+                # DELETE
                 st.markdown("---")
                 with st.expander("🗑️ Delete Product"):
                     st.warning("This will delete the product and unlink all associated auction items.")

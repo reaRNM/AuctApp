@@ -1,125 +1,75 @@
 # closer.py
-import requests
 import argparse
-import re
-import os
-from utils.db import create_connection, update_final_price
-from utils.analytics import update_all_product_stats
 from dotenv import load_dotenv
+from utils.db import create_connection
+from scraper import scrape_auction 
+# NEW: Import Constants
+from utils.parse import KEY_CURRENT_BID, KEY_PROD_ID, KEY_SOLD_PRICE, KEY_IS_WON
 
-# Load environment variables
-load_dotenv()
-
-# === CONFIGURATION ===
-BEARER_TOKEN = os.getenv("HIBID_TOKEN")
-
-if not BEARER_TOKEN:
-    raise ValueError("Error: HIBID_TOKEN not found in .env file")
-
-graphql_url = "https://hibid.com/graphql"
-
-headers = {
-    'authority': 'hibid.com',
-    'method': 'POST',
-    'path': '/graphql',
-    'scheme': 'https',
-    'accept': 'application/json, text/plain, */*',
-    'authorization': BEARER_TOKEN,
-    'content-type': 'application/json',
-    'origin': 'https://hibid.com',
-    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',
-}
-
-# Query to get Final Price (priceRealized)
-query = """
-    query LotSearch($auctionId: Int = null, $pageNumber: Int!, $pageLength: Int!) {
-      lotSearch(
-        input: {auctionId: $auctionId}
-        pageNumber: $pageNumber
-        pageLength: $pageLength
-        sortDirection: DESC
-      ) {
-        pagedResults {
-          results {
-            lotNumber
-            lotState {
-              highBid
-              priceRealized
-              status
-            }
-          }
-        }
-      }
-    }
-"""
-
-def extract_auction_id(url: str) -> int:
-    pattern = r'/catalog/(\d+)|/lots/(\d+)'
-    m = re.search(pattern, url)
-    if not m: raise ValueError("Invalid URL")
-    return int(m.group(1) or m.group(2))
+load_dotenv(override=True)
 
 def process_closed_auction(auction_url: str):
-    auction_id = extract_auction_id(auction_url)
-    print(f"🔒 Closing Auction ID: {auction_id}")
-    
     conn = create_connection()
+    cursor = conn.cursor()
     
-    payload = {
-        "operationName": "LotSearch",
-        "query": query,
-        "variables": {
-            "auctionId": auction_id,
-            "pageNumber": 1,
-            "pageLength": 9000
-        },
-    }
-    
-    response = requests.post(graphql_url, headers=headers, json=payload)
-    
-    if response.status_code != 200:
-        print(f"Error fetching data: {response.status_code}")
-        return
-
-    data = response.json()
-    items = data['data']['lotSearch']['pagedResults']['results']
-    print(f"Processing {len(items)} items...")
-    
-    updated_count = 0
-    
-    for item in items:
-        lot_num = item['lotNumber']
-        state = item.get('lotState', {})
-        
-        # Get Realized Price
-        sold_price = state.get('priceRealized') or 0.0
-        
-        # Determine Status
-        if sold_price > 0:
-            status = "Sold"
-        else:
-            if state.get('highBid', 0) > 0:
-                status = "Passed (Reserve Not Met)"
-            else:
-                status = "Unsold/Passed"
-            
-        update_final_price(conn, auction_id, lot_num, sold_price, status)
-        updated_count += 1
-    
-    # === RUN THE BRAIN ===
-    print("🧠 Running Post-Auction Analytics...")
     try:
-        update_all_product_stats(conn)
-        print("✅ Analytics updated.")
-    except Exception as e:
-        print(f"⚠️ Analytics skipped (Error: {e})")
+        # 1. Get Auction Info
+        res = cursor.execute("SELECT id, auction_title, auctioneer, end_date FROM auctions WHERE url = ?", (auction_url,)).fetchone()
+        if not res: print("Auction not found."); return
         
-    conn.close()
-    print(f"✅ Successfully updated {updated_count} items with final prices!")
+        auction_id, auc_title, auctioneer, end_date = res
+        source_name = f"{auctioneer} - {auc_title}"
+        close_date = end_date or "Unknown"
+
+        # 2. REFRESH PRICES (Scraper Mode: Update)
+        print("🕷️ Refreshing final prices...")
+        try:
+            scrape_auction(auction_url, is_update=True)
+        except Exception as e:
+            print(f"⚠️ Scrape warning: {e}. Using cached data.")
+
+        # 3. HARVEST MARKET DATA
+        print("🧠 Harvesting market data...")
+        # Uses Constants in SQL logic where appropriate, though SQL structure is fixed
+        market_items = cursor.execute(f"""
+            SELECT {KEY_PROD_ID}, {KEY_CURRENT_BID} FROM auction_items 
+            WHERE auction_id = ? AND {KEY_PROD_ID} IS NOT NULL AND {KEY_CURRENT_BID} > 0
+        """, (auction_id,)).fetchall()
+        
+        for pid, price in market_items:
+            cursor.execute("INSERT INTO product_price_history (product_id, sold_price, sold_date, auction_source) VALUES (?, ?, ?, ?)", 
+                           (pid, price, close_date, source_name))
+            
+            avg = cursor.execute("SELECT AVG(sold_price) FROM product_price_history WHERE product_id=?", (pid,)).fetchone()[0]
+            if avg: cursor.execute("UPDATE products SET avg_sold_price = ? WHERE id=?", (round(avg,2), pid))
+
+        # 4. MIGRATE WON ITEMS
+        print("📦 Moving winners to Inventory...")
+        won_items = cursor.execute(f"""
+            SELECT {KEY_PROD_ID}, lot, {KEY_CURRENT_BID}, title FROM auction_items 
+            WHERE auction_id = ? AND {KEY_IS_WON} = 1
+        """, (auction_id,)).fetchall()
+        
+        for pid, lot, price, title in won_items:
+            cursor.execute("""
+                INSERT INTO inventory_ledger (product_id, auction_source, lot_number, purchase_price, total_cost, status, notes)
+                VALUES (?, ?, ?, ?, ?, 'In Stock', ?)
+            """, (pid, source_name, lot, price, price, f"Won: {title}"))
+
+        # 5. PURGE
+        print("🗑️ Deleting auction...")
+        cursor.execute("DELETE FROM auctions WHERE id = ?", (auction_id,))
+        conn.commit()
+        print("✅ Auction Closed & Cleaned.")
+
+    except Exception as e:
+        print(f"Error: {e}")
+        conn.rollback()
+    finally:
+        conn.close()
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Close out an auction.")
-    parser.add_argument("url", type=str, help="Auction URL")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("url", type=str)
     args = parser.parse_args()
-    
     process_closed_auction(args.url)

@@ -1,57 +1,69 @@
 # utils/analytics.py
 import sqlite3
 import pandas as pd
+from utils.db import create_connection
+# IMPORT CONSTANTS
+from utils.parse import COL_CAT, COL_TOTAL_COST, COL_PROFIT_REALIZED
 
-def recalculate_product_stats(conn: sqlite3.Connection, product_id: int) -> bool:
+def get_inventory_stats(conn: sqlite3.Connection):
+    query_invest = "SELECT SUM(total_cost) FROM inventory_ledger"
+    total_invest = conn.execute(query_invest).fetchone()[0] or 0.0
+
+    query_revenue = "SELECT SUM(sold_price) FROM inventory_ledger WHERE status = 'Sold'"
+    total_revenue = conn.execute(query_revenue).fetchone()[0] or 0.0
+
+    query_cogs = "SELECT SUM(total_cost) FROM inventory_ledger WHERE status = 'Sold'"
+    cogs = conn.execute(query_cogs).fetchone()[0] or 0.0
+
+    gross_profit = total_revenue - cogs
+    roi = (gross_profit / cogs * 100) if cogs > 0 else 0.0
+    query_potential = "SELECT SUM(listing_price) FROM inventory_ledger WHERE status = 'Listed'"
+    potential_revenue = conn.execute(query_potential).fetchone()[0] or 0.0
+
+    return {
+        "total_investment": total_invest,
+        "total_revenue": total_revenue,
+        "gross_profit": gross_profit,
+        "roi": roi,
+        "potential_revenue": potential_revenue
+    }
+
+def get_sales_over_time(conn: sqlite3.Connection, period='Month'):
+    date_format = "%Y-%m" if period == 'Month' else "%Y-%W"
+    query = f"""
+        SELECT 
+            strftime('{date_format}', sold_date) as period, 
+            SUM(sold_price) as revenue,
+            SUM(sold_price - total_cost) as profit,
+            COUNT(id) as items_sold
+        FROM inventory_ledger
+        WHERE status = 'Sold' AND sold_date IS NOT NULL
+        GROUP BY period
+        ORDER BY period ASC
     """
-    Analyzes all sold history for a Master Product and updates its stats.
+    return pd.read_sql_query(query, conn)
+
+def get_category_breakdown(conn: sqlite3.Connection):
+    # Returns DF with standardized columns
+    query = f"""
+        SELECT 
+            p.category as "{COL_CAT}",
+            COUNT(l.id) as items_count,
+            SUM(l.total_cost) as "{COL_TOTAL_COST}",
+            SUM(CASE WHEN l.status='Sold' THEN l.sold_price - l.total_cost ELSE 0 END) as "{COL_PROFIT_REALIZED}"
+        FROM inventory_ledger l
+        LEFT JOIN products p ON l.product_id = p.id
+        WHERE p.category IS NOT NULL
+        GROUP BY p.category
+        ORDER BY "{COL_PROFIT_REALIZED}" DESC
     """
-    if not product_id: return False
-    
-    # 1. Get all "Sold" items linked to this product
+    return pd.read_sql_query(query, conn)
+
+def get_market_trends(conn: sqlite3.Connection, product_id: int):
     query = """
-        SELECT sold_price 
-        FROM auction_items 
-        WHERE product_id = ? 
-          AND sold_price > 0 
-          AND status = 'Sold'
+        SELECT sold_date, sold_price, auction_source
+        FROM product_price_history
+        WHERE product_id = ?
+        ORDER BY sold_date ASC
     """
-    df = pd.read_sql_query(query, conn, params=(product_id,))
-    
-    if df.empty:
-        return False
-
-    # 2. Calculate Stats
-    avg_price = df['sold_price'].mean()
-    sold_count = len(df)
-    
-    # 3. Update Master Record
-    cursor = conn.cursor()
-    cursor.execute("""
-        UPDATE products 
-        SET avg_sold_price = ?
-        WHERE id = ?
-    """, (avg_price, product_id))
-    
-    conn.commit()
-    print(f"🧠 Updated Product #{product_id}: Avg ${avg_price:.2f} ({sold_count} sales)")
-    return True
-
-def update_all_product_stats(conn: sqlite3.Connection):
-    """Runs the analyzer on EVERY product in the library."""
-    print("🧠 Starting Analytics Run...")
-    
-    # Get all unique product IDs that have sold items
-    query = """
-        SELECT DISTINCT product_id 
-        FROM auction_items 
-        WHERE product_id IS NOT NULL 
-          AND sold_price > 0
-    """
-    product_ids = pd.read_sql_query(query, conn)['product_id'].tolist()
-    
-    print(f"Analyzing {len(product_ids)} products...")
-    for p_id in product_ids:
-        recalculate_product_stats(conn, p_id)
-    
-    print("🧠 Analytics Run Complete.")
+    return pd.read_sql_query(query, conn, params=(product_id,))

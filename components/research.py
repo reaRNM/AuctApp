@@ -4,6 +4,13 @@ from typing import Any
 from utils.inventory import get_product_by_id, save_product_to_library
 from components.research_ui import render_product_form_fields
 from utils.ai import extract_data_with_gemini, get_api_key
+# IMPORT ALL NECESSARY CONSTANTS
+from utils.parse import (
+    KEY_SUG_MSRP, KEY_SCRAPED_MSRP, COL_MSRP, COL_CAT, KEY_SCRAPED_CAT, KEY_PROD_ID,
+    COL_TITLE, COL_BRAND, COL_MODEL, COL_UPC, COL_ASIN, COL_NOTES
+)
+
+
 
 # === HELPERS ===
 def _find_best_value(item: dict, keys: list, type_cast: Any = str):
@@ -19,23 +26,25 @@ def _find_best_value(item: dict, keys: list, type_cast: Any = str):
 
 def _get_initial_data(conn, first_item):
     """Loads existing product data or creates a template from the auction item."""
-    existing_product_id = first_item.get('product_id')
+    existing_product_id = first_item.get(KEY_PROD_ID)
     
     if existing_product_id and existing_product_id > 0:
         loaded_prod = get_product_by_id(conn, existing_product_id)
         if loaded_prod is not None:
             return loaded_prod.to_dict(), existing_product_id, True
 
-    msrp_guess = _find_best_value(first_item, ['Scraped MSRP', 'suggested_msrp', 'MSRP'], float)
-    cat_guess = _find_best_value(first_item, ['Category', 'scraped_category'], str)
+    # Uses Constants
+    msrp_guess = _find_best_value(first_item, [KEY_SCRAPED_MSRP, KEY_SUG_MSRP, COL_MSRP], float)
+    cat_guess = _find_best_value(first_item, [COL_CAT, KEY_SCRAPED_CAT], str)
 
+    # FIXED: Now using constants for dictionary lookups
     product_data = {
-        'title': first_item.get('Title'), 
-        'brand': first_item.get('Brand'),
-        'model': first_item.get('Model'), 
-        'upc': first_item.get('UPC'),
-        'asin': first_item.get('ASIN'), 
-        'notes': first_item.get('Notes'),
+        'title': first_item.get(COL_TITLE), 
+        'brand': first_item.get(COL_BRAND),
+        'model': first_item.get(COL_MODEL), 
+        'upc': first_item.get(COL_UPC),
+        'asin': first_item.get(COL_ASIN), 
+        'notes': first_item.get(COL_NOTES),
         'msrp': msrp_guess,
         'category': cat_guess
     }
@@ -71,7 +80,6 @@ def _manage_session_state(selected_rows):
     return current_ids
 
 def _get_button_label(is_bulk: bool, is_linked: bool, count: int) -> str:
-    """Determines the submit button label (Fixes Nested Conditional)."""
     if is_bulk:
         return f"🔗 Create Master & Link {count} Items"
     if is_linked:
@@ -144,8 +152,17 @@ def render_research_station(conn, selected_rows):
     
     if 'ai_result' in st.session_state and st.session_state.ai_result:
         ai_data = st.session_state.ai_result
-        clean_ai = {k: v for k, v in ai_data.items() if v is not None and v != 0 and v != ""}
-        product_data.update(clean_ai)
+        
+        # --- FIX: Handle List vs Dict ---
+        if isinstance(ai_data, list):
+            if len(ai_data) > 0 and isinstance(ai_data[0], dict):
+                ai_data = ai_data[0] # Unwrap list
+            else:
+                ai_data = {} # Invalid format
+        
+        if isinstance(ai_data, dict):
+            clean_ai = {k: v for k, v in ai_data.items() if v is not None and v != 0 and v != ""}
+            product_data.update(clean_ai)
 
     # 3. Render Header
     st.markdown("---")

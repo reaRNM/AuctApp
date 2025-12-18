@@ -1,19 +1,19 @@
 # components/filters.py
 import streamlit as st
 import pandas as pd
+# NEW: Import DB Keys
+from utils.parse import (
+    COL_BID, KEY_CURRENT_BID, COL_BRAND, COL_CAT, COL_RISK, COL_WATCH,
+    KEY_DB_BRAND, KEY_DB_CAT, KEY_IS_WATCHED
+)
 
-# === HELPER: Extract Numeric Bid ===
 def get_bid_values(df: pd.DataFrame) -> pd.Series:
-    """
-    Robustly find bid values. 
-    If 'current_bid' (raw) is missing, parse the formatted 'Bid' column ($1,200.00).
-    """
-    if "current_bid" in df.columns:
-        return pd.to_numeric(df["current_bid"], errors="coerce").fillna(0.0)
+    if KEY_CURRENT_BID in df.columns:
+        return pd.to_numeric(df[KEY_CURRENT_BID], errors="coerce").fillna(0.0)
     
-    if "Bid" in df.columns:
+    if COL_BID in df.columns:
         return (
-            df["Bid"]
+            df[COL_BID]
             .astype(str)
             .replace(r"[$,]", "", regex=True)
             .apply(pd.to_numeric, errors="coerce")
@@ -21,9 +21,7 @@ def get_bid_values(df: pd.DataFrame) -> pd.Series:
         )
     return pd.Series([0.0] * len(df))
 
-# === RENDER FILTERS ===
 def render_filters(df: pd.DataFrame) -> dict:
-    """Render Streamlit filters and return dictionary of selected values."""
     df = df.copy()
     
     bid_values = get_bid_values(df)
@@ -35,17 +33,16 @@ def render_filters(df: pd.DataFrame) -> dict:
     with col1: min_bid = st.slider("Min Bid ($)", 0.0, max_val, 0.0, step=5.0)
     with col2: max_bid = st.slider("Max Bid ($)", 0.0, max_val, max_val, step=5.0)
 
-    # Brand
-    brand_col = "Brand" if "Brand" in df.columns else "brand"
+    # UPDATED: Use Constant for fallback
+    brand_col = COL_BRAND if COL_BRAND in df.columns else KEY_DB_BRAND
     brands = sorted(df[brand_col].dropna().unique().tolist()) if brand_col in df.columns else []
     with col3: selected_brands = st.multiselect("Brand", brands, default=[])
 
-    # Category
-    cat_col = "Category" if "Category" in df.columns else "category"
+    # UPDATED: Use Constant for fallback
+    cat_col = COL_CAT if COL_CAT in df.columns else KEY_DB_CAT
     cats = sorted(df[cat_col].dropna().unique().tolist()) if cat_col in df.columns else []
     with col4: selected_cats = st.multiselect("Category", cats, default=[])
 
-    # NEW: Added Watch List checkbox here
     with col5: 
         show_no_bids = st.checkbox("Show Only No Bids", value=False)
         show_watchlist = st.checkbox("⭐ Show Watch List", value=False)
@@ -60,14 +57,13 @@ def render_filters(df: pd.DataFrame) -> dict:
         "selected_brands": selected_brands,
         "selected_cats": selected_cats,
         "show_no_bids_only": show_no_bids,
-        "show_watchlist": show_watchlist, # NEW
+        "show_watchlist": show_watchlist,
         "hide_high_risk": hide_high,
         "hide_medium_risk": hide_med,
         "brand_col_name": brand_col,
         "cat_col_name": cat_col
     }
 
-# === LOGIC HELPERS ===
 def _filter_by_bids(df: pd.DataFrame, filters: dict) -> pd.DataFrame:
     bid_values = get_bid_values(df)
     
@@ -99,40 +95,35 @@ def _filter_by_category(df: pd.DataFrame, filters: dict) -> pd.DataFrame:
         return df[df[cat_col].isin(cats)]
     return df
 
-# NEW: Filter by Watch column
 def _filter_by_watch(df: pd.DataFrame, filters: dict) -> pd.DataFrame:
     if filters.get("show_watchlist"):
-        # "Watch" is the boolean column created in Active Viewer
-        if "Watch" in df.columns:
-            return df[df["Watch"] == True]
-        # Fallback to DB column if "Watch" display column missing
-        elif "is_watched" in df.columns:
-             return df[df["is_watched"] == 1]
+        if COL_WATCH in df.columns:
+            return df[df[COL_WATCH] == True]
+        # UPDATED: Use Constant
+        elif KEY_IS_WATCHED in df.columns:
+             return df[df[KEY_IS_WATCHED] == 1]
     return df
 
 def _filter_by_risk(df: pd.DataFrame, filters: dict) -> pd.DataFrame:
-    if "Risk" not in df.columns:
+    if COL_RISK not in df.columns:
         return df
         
     if filters.get("hide_high_risk"):
-        df = df[df["Risk"] != "HIGH RISK"]
+        df = df[df[COL_RISK] != "HIGH RISK"]
         
     if filters.get("hide_medium_risk"):
-        df = df[df["Risk"] != "MEDIUM RISK"]
+        df = df[df[COL_RISK] != "MEDIUM RISK"]
         
     return df
 
-# === MAIN APPLY FUNCTION ===
 def apply_filters(df: pd.DataFrame, filters: dict) -> pd.DataFrame:
-    """Apply all selected filters to the DataFrame."""
     if df.empty: return df
 
     filtered = df.copy()
-    
     filtered = _filter_by_bids(filtered, filters)
     filtered = _filter_by_brand(filtered, filters)
     filtered = _filter_by_category(filtered, filters)
     filtered = _filter_by_risk(filtered, filters)
-    filtered = _filter_by_watch(filtered, filters) # NEW
+    filtered = _filter_by_watch(filtered, filters)
 
     return filtered

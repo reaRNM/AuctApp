@@ -1,4 +1,4 @@
-# pages/2_Auction_History.py
+# pages/3_Auction_History.py
 import streamlit as st
 import pandas as pd
 import sys
@@ -11,42 +11,28 @@ from utils.db import create_connection, get_closed_auctions, get_auction_items, 
 from components.grid_styles import JS_CURRENCY_SORT, JS_NATURAL_SORT, JS_PROFIT_STYLE
 from components.research import render_research_station
 from utils.inventory import auto_link_products
+# Constants
+from utils.parse import COL_LOT, COL_SOLD, COL_STATUS, COL_TITLE, COL_PROFIT_REALIZED, COL_MSRP_STAT, COL_MSRP, COL_BRAND, COL_MODEL
 
-# CONSTANTS
-COL_LOT = "Lot"
-COL_SOLD = "Sold Price"
-COL_STATUS = "Status"
-COL_TITLE = "Title"
-COL_PROFIT = "Realized Profit"
-COL_MSRP_STAT = "MSRP Status"
-COL_MSRP = "MSRP" # New
-
-# ----------------------------------------------------------------------
-# HELPER FUNCTIONS
-# ----------------------------------------------------------------------
 def render_history_grid(df: pd.DataFrame):
-    """Configures and renders the AgGrid."""
     gb = GridOptionsBuilder.from_dataframe(df)
     gb.configure_default_column(sortable=True, filterable=True, resizable=True)
 
-    # Hide Utility Cols
     for col in ["id", "current_bid", "sold_price", "is_hidden", "product_id", "auction_id", 
                 "master_msrp", "master_target_price", "suggested_msrp", "profit_val"]:
         if col in df.columns: gb.configure_column(col, hide=True)
 
-    # === COLUMN SIZING (FIXED) ===
-    # Making these columns explicitly smaller as requested
     if COL_LOT in df.columns: 
         gb.configure_column(COL_LOT, width=80, comparator=JS_NATURAL_SORT)
     
     if COL_STATUS in df.columns: 
         gb.configure_column(COL_STATUS, width=100)
         
-    if "Display_Sold" in df.columns: 
-        gb.configure_column("Display_Sold", width=100, comparator=JS_CURRENCY_SORT, headerName="Sold")
+    if COL_SOLD in df.columns: 
+        gb.configure_column(COL_SOLD, width=100, comparator=JS_CURRENCY_SORT)
         
-    if COL_PROFIT in df.columns: 
-        gb.configure_column(COL_PROFIT, width=100, comparator=JS_CURRENCY_SORT, cellStyle=JS_PROFIT_STYLE)
+    if COL_PROFIT_REALIZED in df.columns: 
+        gb.configure_column(COL_PROFIT_REALIZED, width=100, comparator=JS_CURRENCY_SORT, cellStyle=JS_PROFIT_STYLE)
         
     if COL_MSRP in df.columns:
         gb.configure_column(COL_MSRP, width=100)
@@ -54,7 +40,6 @@ def render_history_grid(df: pd.DataFrame):
     if COL_TITLE in df.columns:
         gb.configure_column(COL_TITLE, width=350, wrapText=True, autoHeight=True)
 
-    # Styles
     status_style = JsCode("""
         function(params) {
             if (params.value === 'Sold') return {color: 'green', fontWeight: 'bold'};
@@ -88,13 +73,9 @@ def _get_auction_selection(conn):
         return None
 
     st.sidebar.header("History Selection")
-    
-    # === NEW: HUMAN READABLE NAMES ===
-    # Format: "Auctioneer Name - Date (ID)"
-    # If name/date missing (old scrape), fallback to ID
     options = {}
     for _, r in auctions.iterrows():
-        label = f"{r['id']} - {r['url']}" # Fallback
+        label = f"{r['id']} - {r['url']}"
         if r['auctioneer'] and r['end_date']:
             label = f"{r['auctioneer']} - {r['end_date']} (ID: {r['id']})"
         options[label] = r["id"]
@@ -111,11 +92,9 @@ def _load_and_process_data(conn, auction_id):
     df["master_msrp"] = pd.to_numeric(df["master_msrp"], errors="coerce").fillna(0.00)
     df["master_target_price"] = pd.to_numeric(df["master_target_price"], errors="coerce").fillna(0.00)
 
-    # MSRP & Profit
     df["working_msrp"] = df["master_msrp"]
     df.loc[df["working_msrp"] == 0, "working_msrp"] = df["suggested_msrp"]
     
-    # NEW: Display MSRP
     df[COL_MSRP] = df["working_msrp"].apply(lambda x: f"${x:,.2f}" if x > 0 else "-")
 
     def determine_msrp_status(row):
@@ -128,22 +107,23 @@ def _load_and_process_data(conn, auction_id):
         lambda x: (x['master_target_price'] if x['master_target_price'] > 0 else x['working_msrp'] * 0.5) 
         - x['sold_price'], axis=1
     )
-    df[COL_PROFIT] = df["profit_val"].apply(lambda x: f"${x:,.2f}")
+    df[COL_PROFIT_REALIZED] = df["profit_val"].apply(lambda x: f"${x:,.2f}")
 
     rename_map = {
-        "lot_number": COL_LOT, "sold_price": COL_SOLD, "status": COL_STATUS,
-        "title": COL_TITLE, "brand": "Brand", "model": "Model"
+        "lot_number": COL_LOT, 
+        "status": COL_STATUS,
+        "title": COL_TITLE, 
+        "brand": COL_BRAND, 
+        "model": COL_MODEL
     }
     df = df.rename(columns=rename_map)
 
-    if COL_SOLD in df.columns:
-        df["Display_Sold"] = df[COL_SOLD].apply(lambda x: f"${x:,.2f}" if x > 0 else "-")
-    else:
-        df["Display_Sold"] = "-"
+    # Use constant for Sold column
+    if "sold_price" in df.columns:
+        df[COL_SOLD] = df["sold_price"].apply(lambda x: f"${x:,.2f}" if x > 0 else "-")
         
     return df
 
-# ... (Keep _perform_bulk_update and _handle_sidebar_actions unchanged) ...
 def _perform_bulk_update(conn, selected_rows, title, brand, model):
     progress = st.sidebar.progress(0)
     total = len(selected_rows)
@@ -185,11 +165,10 @@ def main():
         df = _load_and_process_data(conn, auction_id)
         if df.empty: st.warning("No items found."); return
 
-        # FIXED: Added MSRP to display cols
         display_cols = [
-            COL_LOT, COL_STATUS, "Display_Sold", COL_MSRP, # Added MSRP here
-            COL_PROFIT, COL_MSRP_STAT, 
-            COL_TITLE, "Brand", "Model", 
+            COL_LOT, COL_STATUS, COL_SOLD, COL_MSRP,
+            COL_PROFIT_REALIZED, COL_MSRP_STAT, 
+            COL_TITLE, COL_BRAND, COL_MODEL, 
             "id", "product_id"
         ]
         safe_cols = [c for c in display_cols if c in df.columns]
